@@ -1,0 +1,6 @@
+__pycache__
+data_cache/
+experiments/
+*.hdf5
+requirements.txt
+.DS_Store
