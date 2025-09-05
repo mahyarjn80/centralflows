@@ -75,7 +75,7 @@ class DatasetBuilder:
     def get_output_dim(self) -> int:
         pass
     
-    def get_acc_and_loss(self) -> Tuple[Callable, Callable]:
+    def get_loss_and_acc(self) -> Tuple[Callable, Callable]:
         pass
 
     def download(self) -> Optional[Dict]:
@@ -121,7 +121,7 @@ class DatasetBuilder:
         trainset, testset = self._batch(train), self._batch(test)
         
         # get loss criterion function and accuracy function
-        criterion_fn, accuracy_fn = self.get_acc_and_loss()
+        criterion_fn, accuracy_fn = self.get_loss_and_acc()
         
         return Dataset(
             trainset=trainset,
@@ -221,7 +221,7 @@ class CIFAR10(DatasetBuilder):
         else:
             return self.classes
 
-    def get_acc_and_loss(self) -> Tuple[Callable, Callable]:
+    def get_loss_and_acc(self) -> Tuple[Callable, Callable]:
         if self.classes == "binary":
             if self.criterion == "ce":
                 criterion_fn = ce_binary_loss
@@ -290,7 +290,7 @@ class SST2(DatasetBuilder):
     def get_output_dim(self) -> int:
         return 1
 
-    def get_acc_and_loss(self) -> Tuple[Callable, Callable]:
+    def get_loss_and_acc(self) -> Tuple[Callable, Callable]:
         if self.criterion == "ce":
             criterion_fn = ce_binary_loss
         elif self.criterion == "mse":
@@ -356,7 +356,7 @@ class Classification(DatasetBuilder):
     def get_output_dim(self) -> int:
         return self.classes
 
-    def get_acc_and_loss(self) -> Tuple[Callable, Callable]:
+    def get_loss_and_acc(self) -> Tuple[Callable, Callable]:
         return mse_categorical_loss, categorical_accuracy
     
     def make(self, raw_data=None):
@@ -387,7 +387,7 @@ class Moons(DatasetBuilder):
     def get_output_dim(self) -> int:
         return 1
 
-    def get_acc_and_loss(self) -> Tuple[Callable, Callable]:
+    def get_loss_and_acc(self) -> Tuple[Callable, Callable]:
         return mse_binary_loss, binary_accuracy
     
     def make(self, raw_data=None):
@@ -419,7 +419,7 @@ class Circles(DatasetBuilder):
     def get_output_dim(self) -> int:
         return 1
 
-    def get_acc_and_loss(self) -> Tuple[Callable, Callable]:
+    def get_loss_and_acc(self) -> Tuple[Callable, Callable]:
         return mse_binary_loss, binary_accuracy
 
     def make(self, raw_data=None):
@@ -455,7 +455,7 @@ class Sorting(DatasetBuilder):
     def get_output_dim(self) -> int:
         return self.vocab_size
 
-    def get_acc_and_loss(self) -> Tuple[Callable, Callable]:
+    def get_loss_and_acc(self) -> Tuple[Callable, Callable]:
         if self.criterion == "ce":
             criterion_fn = ce_categorical_loss
         elif self.criterion == "mse":
@@ -508,7 +508,7 @@ class Copying(DatasetBuilder):
     def get_output_dim(self) -> int:
         return self.vocab_size
 
-    def get_acc_and_loss(self) -> Tuple[Callable, Callable]:
+    def get_loss_and_acc(self) -> Tuple[Callable, Callable]:
         if self.criterion == "ce":
             criterion_fn = ce_categorical_loss
         elif self.criterion == "mse":
