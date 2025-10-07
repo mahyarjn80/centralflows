@@ -33,10 +33,10 @@ from src.architectures import CNN, MLP, VIT, LSTM, Mamba, Transformer, Resnet
 # Import optimizers from shmapooV2.py
 # We'll need to copy the Shampoo and Muon optimizer classes
 
-os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
-torch.backends.cudnn.allow_tf32 = False
-torch.backends.cuda.matmul.allow_tf32 = False
-torch.set_float32_matmul_precision("highest")
+# os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
+# torch.backends.cudnn.allow_tf32 = False
+# torch.backends.cuda.matmul.allow_tf32 = False
+# torch.set_float32_matmul_precision("highest")
 # Note: CifarLoader uses randomness, so we can't use deterministic algorithms
 # torch.use_deterministic_algorithms(True)
 torch.backends.cudnn.benchmark = True
