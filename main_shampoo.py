@@ -625,7 +625,7 @@ def main(
     if opt == "shampoo":
         optimizer2 = Shampoo(filter_params, lr=lr_filters, momentum=momentum_shampoo, weight_decay=weight_decay, order=shampoo_order) if len(filter_params) > 0 else None
     elif opt == "muon":
-        optimizer2 = Muon(filter_params, lr=0.05, momentum=0.6, nesterov=True) if len(filter_params) > 0 else None
+        optimizer2 = Muon(filter_params, lr=0.01, momentum=0.6, nesterov=True) if len(filter_params) > 0 else None
     else:
         raise ValueError(f"Invalid optimizer: {opt}")
     
