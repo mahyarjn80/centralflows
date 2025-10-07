@@ -14,7 +14,7 @@ class Resnet(Architecture):
     # activation: Callable = nn.GELU()
     activation: str = 'gelu'
     width: int = 16
-    stage_sizes: Tuple[int] = (3, 3, 3)
+    stage_sizes: Tuple[int, ...] = (3, 3, 3)
 
     def create(self, input_shape, output_dim):
         conv3x3 = partial(nn.Conv2d, kernel_size=3, padding=1, bias=False)
