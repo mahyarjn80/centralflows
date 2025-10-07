@@ -276,7 +276,7 @@ class Shampoo(torch.optim.Optimizer):
                     g32_t = g32.t()
                     precond.add_(g32 @ g32_t)
                     if state['step'] % group['update_freq'] == 0:
-                        inv_precond.copy_(_matrix_power(precond,  (order)))
+                        inv_precond.copy_(_matrix_power(precond,  (2*order)))
 
                     if dim_id == order - 1:
                         # finally
@@ -576,7 +576,7 @@ def main(
     seed: int = 0,                    # random seed
     save_results: bool = True,        # whether to save results
 ):
-    print("Starting training with Shampoo optimizer")
+    print(f"Starting training with {opt} optimizer")
     
     # Read code for saving
     with open(sys.argv[0]) as f:
