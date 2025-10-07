@@ -334,7 +334,7 @@ class Adam(torch.optim.Optimizer):
 
 
 @torch.compile
-def zeropower_via_newtonschulz5(G, steps=3, eps=1e-7):
+def zeropower_via_newtonschulz5(G, steps=5, eps=1e-7):
     """
     Newton-Schulz iteration to compute the zeroth power / orthogonalization of G. We opt to use a
     quintic iteration whose coefficients are selected to maximize the slope at zero. For the purpose
@@ -347,27 +347,30 @@ def zeropower_via_newtonschulz5(G, steps=3, eps=1e-7):
     assert len(G.shape) == 2
     a, b, c = (3.4445, -4.7750,  2.0315)
     X = G.bfloat16()
-    X /= (X.norm() + eps) # ensure top singular value <= 1
-    if G.size(0) > G.size(1):
-        X = X.T
+
+    if G.size(-2) > G.size(-1):
+        X = X.mT
+
+    # Ensure spectral norm is at most 1
+    X = X / (X.norm(dim=(-2, -1), keepdim=True) + 1e-7)
     for _ in range(steps):
         A = X @ X.T
         B = b * A + c * A @ A
         X = a * X + B @ X
-    if G.size(0) > G.size(1):
-        X = X.T
+    if G.size(-2) > G.size(1):
+        X = X.mT
     return X
 
 
 class Muon(torch.optim.Optimizer):
-    def __init__(self, params, lr=1e-3, momentum=0, nesterov=False):
+    def __init__(self, params, lr=1e-3, momentum=0, nesterov=False, weight_decay=0):
         if lr < 0.0:
             raise ValueError(f"Invalid learning rate: {lr}")
         if momentum < 0.0:
             raise ValueError(f"Invalid momentum value: {momentum}")
         if nesterov and momentum <= 0:
             raise ValueError("Nesterov momentum requires a momentum")
-        defaults = dict(lr=lr, momentum=momentum, nesterov=nesterov)
+        defaults = dict(lr=lr, momentum=momentum, nesterov=nesterov, weight_decay=weight_decay)
         super().__init__(params, defaults)
 
     def step(self):
@@ -382,12 +385,16 @@ class Muon(torch.optim.Optimizer):
 
                 if 'momentum_buffer' not in state.keys():
                     state['momentum_buffer'] = torch.zeros_like(g)
-                buf = state['momentum_buffer']
-                buf.mul_(momentum).add_(g)
-                g = g.add(buf, alpha=momentum) if group['nesterov'] else buf
+                buf = state['momentum_buffer']  
+                # buf.mul_(momentum).add_(g)
+                # g = g.add(buf, alpha=momentum) if group['nesterov'] else buf
 
-                p.data.mul_(len(p.data)**0.5 / p.data.norm()) # normalize the weight
+                buf.lerp_(g, 1 - momentum)
+                update = g.lerp_(buf, momentum) if group['nesterov'] else buf
+                # p.data.mul_(len(p.data)**0.5 / p.data.norm()) # normalize the weight
                 update = zeropower_via_newtonschulz5(g.reshape(len(g), -1)).view(g.shape) # whiten the update
+                update *= max(1, g.size(-2) / g.size(-1))**0.5
+                p.data.mul_(1-lr*group['weight_decay'])
                 p.data.add_(update, alpha=-lr) # take a step
 
 
