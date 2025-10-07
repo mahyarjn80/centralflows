@@ -13,15 +13,12 @@ Example usage:
     python main_shampoo.py --arch resnet --data-path ./data/cifar10 --save-results
 """
 
-import json
 import os
 import sys
 import uuid
 from math import ceil
-from pathlib import Path
 from typing import Annotated, Literal, Optional, Union
 
-import git
 import numpy as np
 import torch
 import torch.nn.functional as F
@@ -519,21 +516,17 @@ def main(
     label_smoothing: float = 0.2,     # label smoothing parameter
     device: str = "cuda",             # cuda or cpu
     seed: int = 0,                    # random seed
-    expid: Optional[str] = None,      # optionally, an experiment id (defaults to a random UUID)
     save_results: bool = True,        # whether to save results
 ):
     print("Starting training with Shampoo optimizer")
     
+    # Read code for saving
+    with open(sys.argv[0]) as f:
+        code = f.read()
+    
     # collect configs that were passed in
     config = convert_dataclasses(locals())
-    try:
-        config["git_hash"] = git.Repo(".").git.rev_parse("HEAD")
-    except:
-        config["git_hash"] = "unknown"
     config["cmd"] = " ".join(sys.argv)
-    
-    # experiment id defaults to random uuid
-    expid = expid or uuid.uuid4().hex
     
     # set random seed
     torch.manual_seed(seed)
@@ -546,6 +539,7 @@ def main(
     train_loader = CifarLoader(data_path, train=True, batch_size=batch_size, aug=aug)
     test_loader = CifarLoader(data_path, train=False, batch_size=2000)
     total_train_steps = ceil(8 * len(train_loader))
+    total_epochs = ceil(total_train_steps / len(train_loader))
 
     # instantiate the model as a PyTorch module
     print("Creating Model")
@@ -648,42 +642,30 @@ def main(
             'test_acc': test_acc,
             'lr': current_lr,
         }
-        print_training_details(log_dict, is_final_entry=(epoch == epochs - 1))
+        print_training_details(log_dict, is_final_entry=(epoch == total_epochs - 1))
         
         # Store log
         RUN_LOGS.append([epoch, train_loss, train_acc, test_loss, test_acc, current_lr])
     
     #############################################
-    # Save results
+    # Save results (simple saving like shmapooV2.py)
     #############################################
     
     if save_results:
-        # Create experiment folder
-        experiment_dir = Path(os.environ.get("EXPERIMENT_DIR", "experiments"))
-        folder = experiment_dir / expid
-        folder.mkdir(parents=True, exist_ok=True)
+        log_dir = os.path.join('logs', str(uuid.uuid4()))
+        os.makedirs(log_dir, exist_ok=True)
         
-        print(f"\nSaving results to: {folder}")
+        # Save logs as .pt file
+        log_path = os.path.join(log_dir, 'log.pt')
+        torch.save(dict(code=code, config=config, test_acc=test_acc), log_path)
+        print(os.path.abspath(log_path))
         
-        # Save config
-        with open(folder / "config.json", "w") as config_file:
-            json.dump(config, config_file, indent=4)
-        
-        # Save logs
+        # Save metrics as .npy file
         np.save(
-            folder / "training_logs.npy",
+            os.path.join(log_dir, "metrics.npy"),
             np.array(RUN_LOGS, dtype=object),
             allow_pickle=True
         )
-        
-        # Save model
-        torch.save({
-            'model_state_dict': model.state_dict(),
-            'config': config,
-            'logs': RUN_LOGS,
-        }, folder / "model.pt")
-        
-        print(f"Saved model and logs to {folder}")
     
     print(f"\nFinal Test Accuracy: {test_acc:.4f}")
     return test_acc
