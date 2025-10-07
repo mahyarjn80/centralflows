@@ -658,7 +658,7 @@ def main(
             loss.backward()
             
             for group in optimizer1.param_groups+optimizer2.param_groups:
-                group["lr"] = group["initial_lr"] * (1 - step / (total_train_steps*4))
+                group["lr"] = group["initial_lr"] * (1 - step / (total_train_steps))
 
             
             # Optimizer step
