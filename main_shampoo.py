@@ -552,10 +552,6 @@ def main(
     
     
 
-    filter_params = [p for n, p in model.named_parameters() if p.ndim >= 2 and "embed" not in n]
-    head_params = [p for n, p in model.named_parameters() if ("embed" in n or "cls" in n)]
-    bias_params = [p for p in model.parameters() if p.ndim < 2]
-
 
     filter_params = [p for n, p in model.named_parameters() if ((p.ndim >= 2 and "embed" not in n) and p.requires_grad )]
     head_params = [p for n, p in model.named_parameters() if (("embed" in n or 'cls' in n) and p.requires_grad and p.ndim >= 2)]
