@@ -297,7 +297,7 @@ class Shampoo(torch.optim.Optimizer):
 
 
 class Adam(torch.optim.Optimizer):
-    def __init__(self, param_groups):
+    def __init__(self, param_groups, lr, betas, eps, weight_decay):
         defaults = dict(
             lr=lr,
             betas=betas,
