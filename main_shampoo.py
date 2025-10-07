@@ -29,7 +29,6 @@ from tqdm import trange
 from tyro.conf import arg, subcommand
 
 from src.architectures import CNN, MLP, VIT, LSTM, Mamba, Transformer, Resnet
-from src.utils import convert_dataclasses
 
 # Import optimizers from shmapooV2.py
 # We'll need to copy the Shampoo and Muon optimizer classes
@@ -578,14 +577,6 @@ def main(
 ):
     print(f"Starting training with {opt} optimizer")
     
-    # Read code for saving
-    with open(sys.argv[0]) as f:
-        code = f.read()
-    
-    # collect configs that were passed in
-    config = convert_dataclasses(locals())
-    config["cmd"] = " ".join(sys.argv)
-    
     # set random seed
     torch.manual_seed(seed)
     if device == "cuda":
@@ -596,7 +587,7 @@ def main(
     aug = dict(flip=True, translate=2) if use_augmentation else {}
     train_loader = CifarLoader(data_path, train=True, batch_size=batch_size, aug=aug)
     test_loader = CifarLoader(data_path, train=False, batch_size=2000)
-    total_train_steps = ceil(8 * len(train_loader))
+    total_train_steps = ceil(20 * len(train_loader))
     total_epochs = ceil(total_train_steps / len(train_loader))
 
     # instantiate the model as a PyTorch module
@@ -667,7 +658,7 @@ def main(
             loss.backward()
             
             for group in optimizer1.param_groups+optimizer2.param_groups:
-                group["lr"] = group["initial_lr"] * (1 - step / total_train_steps)
+                group["lr"] = group["initial_lr"] * (1 - step / (total_train_steps*4))
 
             
             # Optimizer step
@@ -711,24 +702,17 @@ def main(
         RUN_LOGS.append([epoch, train_loss, train_acc, test_loss, test_acc, current_lr])
     
     #############################################
-    # Save results (simple saving like shmapooV2.py)
+    # Save results (only metrics.npy)
     #############################################
     
     if save_results:
         log_dir = os.path.join('logs', str(uuid.uuid4()))
         os.makedirs(log_dir, exist_ok=True)
         
-        # Save logs as .pt file
-        log_path = os.path.join(log_dir, 'log.pt')
-        torch.save(dict(code=code, config=config, test_acc=test_acc), log_path)
-        print(os.path.abspath(log_path))
-        
         # Save metrics as .npy file
-        np.save(
-            os.path.join(log_dir, "metrics.npy"),
-            np.array(RUN_LOGS, dtype=object),
-            allow_pickle=True
-        )
+        metrics_path = os.path.join(log_dir, "metrics.npy")
+        np.save(metrics_path, np.array(RUN_LOGS, dtype=object), allow_pickle=True)
+        print(f"Metrics saved to: {os.path.abspath(metrics_path)}")
     
     print(f"\nFinal Test Accuracy: {test_acc:.4f}")
     return test_acc
