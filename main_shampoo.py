@@ -275,7 +275,7 @@ class Shampoo(torch.optim.Optimizer):
                     g32_t = g32.t()
                     precond.add_(g32 @ g32_t)
                     if state['step'] % group['update_freq'] == 0:
-                        inv_precond.copy_(_matrix_power(precond,  (2*order)))
+                        inv_precond.copy_(_matrix_power(precond,  (order)))
 
                     if dim_id == order - 1:
                         # finally
