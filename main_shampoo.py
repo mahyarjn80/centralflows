@@ -625,7 +625,7 @@ def main(
     if opt == "shampoo":
         optimizer2 = Shampoo(filter_params, lr=lr_filters, momentum=momentum_shampoo, weight_decay=weight_decay, order=shampoo_order) if len(filter_params) > 0 else None
     elif opt == "muon":
-        optimizer2 = Muon(filter_params, lr=0.1, momentum=0.6, nesterov=True) if len(filter_params) > 0 else None
+        optimizer2 = Muon(filter_params, lr=0.24, momentum=0.6, nesterov=True) if len(filter_params) > 0 else None
     else:
         raise ValueError(f"Invalid optimizer: {opt}")
     
@@ -664,7 +664,7 @@ def main(
             loss.backward()
             
             for group in optimizer1.param_groups+optimizer2.param_groups:
-                group["lr"] = group["initial_lr"] * (1 - step / (total_train_steps/5))
+                group["lr"] = group["initial_lr"] * (1 - step / (total_train_steps/20))
 
             
             # Optimizer step
