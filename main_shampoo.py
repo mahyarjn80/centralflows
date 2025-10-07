@@ -217,6 +217,7 @@ class Shampoo(torch.optim.Optimizer):
             epsilon=epsilon,
             update_freq=update_freq,
         )
+        self.order_multiplier = order_multiplier
         super(Shampoo, self).__init__(params, defaults)
 
     def step(self, closure = None):
