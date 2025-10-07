@@ -194,6 +194,7 @@ class Shampoo(torch.optim.Optimizer):
         weight_decay: float = 0.0,
         epsilon: float = 1e-4,
         update_freq: int = 1,
+        order_multiplier: int = 2,
     ):
 
         if lr <= 0.0:
@@ -275,7 +276,7 @@ class Shampoo(torch.optim.Optimizer):
                     g32_t = g32.t()
                     precond.add_(g32 @ g32_t)
                     if state['step'] % group['update_freq'] == 0:
-                        inv_precond.copy_(_matrix_power(precond,  (2*order)))
+                        inv_precond.copy_(_matrix_power(precond,  (order*self.order_multiplier)))
 
                     if dim_id == order - 1:
                         # finally
@@ -560,9 +561,11 @@ ValidArch = Union[CNN, MLP, VIT, LSTM, Mamba, Transformer, Resnet]
 
 def main(
     arch: ValidArch,        
-    opt: str="shampoo",          # which architecture to train
+    opt: str="shampoo",
+    shampoo_order: int=2,          # which architecture to train
     data_path: str = "cifar10",       # path to store CIFAR10 data
-    batch_size: int = 2000,           # batch size for trainin               
+    batch_size: int = 2000,   
+    batch_sweep_count: int = 20,      # batch size for trainin               
     lr_bias: float = 0.01,            # learning rate for biases
     lr_filters: float = 0.24,         # learning rate for filter params (Shampoo)
     lr_head: float = 0.1,             # learning rate for head/output layer
@@ -576,7 +579,9 @@ def main(
     save_results: bool = True,        # whether to save results
 ):
     print(f"Starting training with {opt} optimizer")
-    
+    if opt == "shampoo":
+        print(f"Order multiplier: {shampoo_order}")
+    print(f"Batch sweep count: {batch_sweep_count}")
     # set random seed
     torch.manual_seed(seed)
     if device == "cuda":
@@ -587,7 +592,8 @@ def main(
     aug = dict(flip=True, translate=2) if use_augmentation else {}
     train_loader = CifarLoader(data_path, train=True, batch_size=batch_size, aug=aug)
     test_loader = CifarLoader(data_path, train=False, batch_size=2000)
-    total_train_steps = ceil(20 * len(train_loader))
+    batch_sweep_count = 20
+    total_train_steps = ceil(batch_sweep_count * len(train_loader))
     total_epochs = ceil(total_train_steps / len(train_loader))
 
     # instantiate the model as a PyTorch module
@@ -617,7 +623,7 @@ def main(
     
     # Optimizer 2: Shampoo for filter parameters
     if opt == "shampoo":
-        optimizer2 = Shampoo(filter_params, lr=lr_filters, momentum=momentum_shampoo, weight_decay=weight_decay) if len(filter_params) > 0 else None
+        optimizer2 = Shampoo(filter_params, lr=lr_filters, momentum=momentum_shampoo, weight_decay=weight_decay, order=shampoo_order) if len(filter_params) > 0 else None
     elif opt == "muon":
         optimizer2 = Muon(filter_params, lr=0.1, momentum=0.6, nesterov=True) if len(filter_params) > 0 else None
     else:
@@ -658,7 +664,7 @@ def main(
             loss.backward()
             
             for group in optimizer1.param_groups+optimizer2.param_groups:
-                group["lr"] = group["initial_lr"] * (1 - step / (total_train_steps))
+                group["lr"] = group["initial_lr"] * (1 - step / (total_train_steps/5))
 
             
             # Optimizer step
