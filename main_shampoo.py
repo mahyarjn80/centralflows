@@ -549,11 +549,17 @@ def main(
     #############################################
     # NEW: Manual optimization setup like shmapooV2.py
     #############################################
+    
+    
+
+    filter_params = [p for n, p in model.named_parameters() if p.ndim >= 2 and "embed" not in n]
+    head_params = [p for n, p in model.named_parameters() if ("embed" in n or "cls" in n)]
+    bias_params = [p for p in model.parameters() if p.ndim < 2]
 
 
-    hidden_matrix_params = [p for n, p in model.named_parameters() if ((p.ndim >= 2 and "embed" not in n) and p.requires_grad )]
-    embed_params = [p for n, p in model.named_parameters() if (("embed" in n or 'cls' in n) and p.requires_grad and p.ndim >= 2)]
-    scalar_params = [p for p in model.parameters() if p.requires_grad and p.ndim < 2]
+    filter_params = [p for n, p in model.named_parameters() if ((p.ndim >= 2 and "embed" not in n) and p.requires_grad )]
+    head_params = [p for n, p in model.named_parameters() if (("embed" in n or 'cls' in n) and p.requires_grad and p.ndim >= 2)]
+    bias_params = [p for p in model.parameters() if p.requires_grad and p.ndim < 2]
     # Create optimizers
     # Optimizer 1: SGD for biases and head
     param_configs_sgd = []
