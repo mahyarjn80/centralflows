@@ -257,6 +257,7 @@ class Shampoo(torch.optim.Optimizer):
                     grad.mul_(1 - momentum).add_(
                         state['momentum_buffer'], alpha=momentum
                     )
+                state['momentum_buffer'].lerp_(grad, 1-momentum)
 
                 if weight_decay > 0:
                     grad.add_(p.data, alpha=group['weight_decay'])
@@ -291,7 +292,7 @@ class Shampoo(torch.optim.Optimizer):
                         grad = g32.view(transposed_size).to(grad.dtype)
 
                 state['step'] += 1
-                state['momentum_buffer'] = grad
+                # state['momentum_buffer'] = grad
                 p.data.add_(grad, alpha=-group['lr'])
 
         return loss
@@ -393,7 +394,7 @@ class Muon(torch.optim.Optimizer):
                 buf.lerp_(g, 1 - momentum)
                 update = g.lerp_(buf, momentum) if group['nesterov'] else buf
                 # p.data.mul_(len(p.data)**0.5 / p.data.norm()) # normalize the weight
-                update = zeropower_via_newtonschulz5(g.reshape(len(g), -1)).view(g.shape) # whiten the update
+                update = zeropower_via_newtonschulz5(update.reshape(len(g), -1)).view(g.shape) # whiten the update
                 update *= max(1, g.size(-2) / g.size(-1))**0.5
                 p.data.mul_(1-lr*group['weight_decay'])
                 p.data.add_(update, alpha=-lr) # take a step
@@ -572,7 +573,7 @@ def main(
     opt: str="shampoo",
     shampoo_order: int=2,          # which architecture to train
     data_path: str = "cifar10",       # path to store CIFAR10 data
-    batch_size: int = 2000,   
+    batch_size: int = 8096,   
     batch_sweep_count: int = 20,      # batch size for trainin               
     lr_bias: float = 0.01,            # learning rate for biases
     lr_filters: float = 0.24,         # learning rate for filter params (Shampoo)
@@ -633,7 +634,7 @@ def main(
     if opt == "shampoo":
         optimizer2 = Shampoo(filter_params, lr=0.01, momentum=momentum_shampoo, weight_decay=weight_decay, order_multiplier=shampoo_order) if len(filter_params) > 0 else None
     elif opt == "muon":
-        optimizer2 = Muon(filter_params, lr=0.01, momentum=0.6, nesterov=True) if len(filter_params) > 0 else None
+        optimizer2 = Muon(filter_params, lr=0.01, momentum=0.9, nesterov=True) if len(filter_params) > 0 else None
     else:
         raise ValueError(f"Invalid optimizer: {opt}")
     
