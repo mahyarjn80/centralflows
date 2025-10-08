@@ -31,10 +31,10 @@ from tqdm import trange
 from src.architectures import CNN, MLP, VIT, LSTM, Mamba, Transformer, Resnet
 from src.utils import convert_dataclasses
 
-os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
-torch.backends.cudnn.allow_tf32 = False
-torch.backends.cuda.matmul.allow_tf32 = False
-torch.set_float32_matmul_precision("highest")
+# os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
+# torch.backends.cudnn.allow_tf32 = False
+# torch.backends.cuda.matmul.allow_tf32 = False
+# torch.set_float32_matmul_precision("highest")
 torch.backends.cudnn.benchmark = True
 
 #############################################
@@ -612,8 +612,8 @@ def main(
     data_path: str = "cifar10",       # path to store CIFAR10 data
     batch_size: int = 8096,           # batch size for training
     lr_bias: float = 0.01,            # learning rate for biases
-    lr_filters_shampoo: float = 0.24, # learning rate for filter params (Shampoo)
-    lr_filters_muon: float = 0.24,    # learning rate for filter params (Muon)
+    lr_filters_shampoo: float = 0.01, # learning rate for filter params (Shampoo)
+    lr_filters_muon: float = 0.01,    # learning rate for filter params (Muon)
     lr_head: float = 0.1,             # learning rate for head/output layer
     momentum_sgd: float = 0.85,       # momentum for SGD optimizer
     momentum_shampoo: float = 0.9,    # momentum for Shampoo optimizer 
