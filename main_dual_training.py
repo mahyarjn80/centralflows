@@ -40,7 +40,6 @@ torch.backends.cudnn.benchmark = True
 #############################################
 #        Shampoo Optimizer (from shmapooV2) #
 #############################################
-
 @torch.no_grad()
 def _matrix_power(
     matrix: torch.Tensor,
@@ -187,12 +186,10 @@ class Shampoo(torch.optim.Optimizer):
         params,
         lr: float = 1e-1,
         momentum: float = 0.0,
-        momentum_precond: float = 0.0,
         weight_decay: float = 0.0,
         epsilon: float = 1e-4,
         update_freq: int = 1,
         order_multiplier: int = 2,
-        nesterov: bool = True,
     ):
 
         if lr <= 0.0:
@@ -211,12 +208,10 @@ class Shampoo(torch.optim.Optimizer):
         defaults = dict(
             lr=lr,
             momentum=momentum,
-            momentum_precond=momentum_precond,
             weight_decay=weight_decay,
             epsilon=epsilon,
             update_freq=update_freq,
-            order_multiplier=order_multiplier,
-            nesterov=nesterov,
+
         )
         self.order_multiplier = order_multiplier
         super(Shampoo, self).__init__(params, defaults)
@@ -240,13 +235,11 @@ class Shampoo(torch.optim.Optimizer):
                 original_size = grad.size()
                 state = self.state[p]
                 momentum = group['momentum']
-                momentum_precond = group['momentum_precond']
-                nesterov = group['nesterov']
                 weight_decay = group['weight_decay']
                 if len(state) == 0:
                     state['step'] = 0
-                    if momentum > 0 or momentum_precond > 0:
-                        state['momentum_buffer'] = torch.zeros_like(grad)
+                    if momentum > 0:
+                        state['momentum_buffer'] = grad.clone()
                     for dim_id, dim in enumerate(grad.size()):
                         # precondition matrices
                         state['precond_{}'.format(dim_id)] = group[
@@ -256,9 +249,14 @@ class Shampoo(torch.optim.Optimizer):
                             'inv_precond_{dim_id}'.format(dim_id=dim_id)
                         ] = torch.zeros(dim, dim, device=grad.device, dtype=torch.float32)
 
-                buf = state['momentum_buffer']
-                buf.mul_(momentum).add_(grad)
-                grad = grad.add(buf, alpha=momentum) if nesterov else buf
+                if momentum > 0:
+                    grad.mul_(1 - momentum).add_(
+                        state['momentum_buffer'], alpha=momentum
+                    )
+                state['momentum_buffer'].lerp_(grad, 1-momentum)
+
+                if weight_decay > 0:
+                    grad.add_(p.data, alpha=group['weight_decay'])
 
                 # See Algorithm 2 for detail
                 for dim_id, dim in enumerate(grad.size()):
@@ -274,7 +272,7 @@ class Shampoo(torch.optim.Optimizer):
 
                     g32 = grad.to(torch.float32)
                     g32_t = g32.t()
-                    precond.mul_(momentum_precond).add_(g32 @ g32_t)
+                    precond.add_(g32 @ g32_t)
                     if state['step'] % group['update_freq'] == 0:
                         inv_precond.copy_(_matrix_power(precond,  (order*self.order_multiplier)))
 
@@ -289,7 +287,8 @@ class Shampoo(torch.optim.Optimizer):
                         # grad (dim, -1)
                         grad = g32.view(transposed_size).to(grad.dtype)
 
-                state['step'] += 1 
+                state['step'] += 1
+                # state['momentum_buffer'] = grad
                 p.data.add_(grad, alpha=-group['lr'])
 
         return loss
@@ -381,6 +380,7 @@ class Muon(torch.optim.Optimizer):
                 if g is None:
                     continue
                 state = self.state[p]
+
                 if 'momentum_buffer' not in state.keys():
                     state['momentum_buffer'] = torch.zeros_like(g)
                 buf = state['momentum_buffer']  
@@ -390,12 +390,10 @@ class Muon(torch.optim.Optimizer):
                 buf.lerp_(g, 1 - momentum)
                 update = g.lerp_(buf, momentum) if group['nesterov'] else buf
                 # p.data.mul_(len(p.data)**0.5 / p.data.norm()) # normalize the weight
-                update = zeropower_via_newtonschulz5(g.reshape(len(g), -1)).view(g.shape) # whiten the update
+                update = zeropower_via_newtonschulz5(update.reshape(len(g), -1)).view(g.shape) # whiten the update
                 update *= max(1, g.size(-2) / g.size(-1))**0.5
                 p.data.mul_(1-lr*group['weight_decay'])
                 p.data.add_(update, alpha=-lr) # take a step
-
-
 
 #############################################
 #                DataLoader                 #
@@ -612,16 +610,15 @@ ValidArch = Union[CNN, MLP, VIT, LSTM, Mamba, Transformer, Resnet]
 def main(
     arch: ValidArch,        
     data_path: str = "cifar10",       # path to store CIFAR10 data
-    batch_size: int = 2000,           # batch size for training
+    batch_size: int = 8096,           # batch size for training
     lr_bias: float = 0.01,            # learning rate for biases
     lr_filters_shampoo: float = 0.24, # learning rate for filter params (Shampoo)
     lr_filters_muon: float = 0.24,    # learning rate for filter params (Muon)
     lr_head: float = 0.1,             # learning rate for head/output layer
     momentum_sgd: float = 0.85,       # momentum for SGD optimizer
-    momentum_shampoo: float = 0.9,    # momentum for Shampoo optimizer
-    momentum_shampoo_precond: float = 0.95, # momentum for Shampoo optimizer preconditioner
+    momentum_shampoo: float = 0.9,    # momentum for Shampoo optimizer 
     shampoo_order: int = 2,           # order for Shampoo optimizer
-    momentum_muon: float = 0.6,       # momentum for Muon optimizer
+    momentum_muon: float = 0.9,       # momentum for Muon optimizer
     weight_decay: float = 0.5,       # weight decay
     use_augmentation: bool = True,    # whether to use data augmentation
     label_smoothing: float = 0.2,     # label smoothing parameter
@@ -693,7 +690,7 @@ def main(
     optimizer_adam_shampoo = Adam(param_configs_sgd_shampoo, lr=lr_bias, betas=(0.9, 0.95), 
                                    eps=1e-10, weight_decay=weight_decay) if param_configs_sgd_shampoo else None
     optimizer_shampoo = Shampoo(filter_params_shampoo, lr=lr_filters_shampoo, momentum=momentum_shampoo, 
-                                weight_decay=weight_decay, momentum_precond=momentum_shampoo_precond, order_multiplier=shampoo_order) if len(filter_params_shampoo) > 0 else None
+                                weight_decay=weight_decay, order_multiplier=shampoo_order) if len(filter_params_shampoo) > 0 else None
     
     optimizers_shampoo = [opt for opt in [optimizer_adam_shampoo, optimizer_shampoo] if opt is not None]
     
