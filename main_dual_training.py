@@ -192,6 +192,7 @@ class Shampoo(torch.optim.Optimizer):
         epsilon: float = 1e-4,
         update_freq: int = 1,
         order_multiplier: int = 2,
+        nesterov: bool = True,
     ):
 
         if lr <= 0.0:
@@ -215,6 +216,7 @@ class Shampoo(torch.optim.Optimizer):
             epsilon=epsilon,
             update_freq=update_freq,
             order_multiplier=order_multiplier,
+            nesterov=nesterov,
         )
         self.order_multiplier = order_multiplier
         super(Shampoo, self).__init__(params, defaults)
@@ -238,6 +240,8 @@ class Shampoo(torch.optim.Optimizer):
                 original_size = grad.size()
                 state = self.state[p]
                 momentum = group['momentum']
+                momentum_precond = group['momentum_precond']
+                nesterov = group['nesterov']
                 weight_decay = group['weight_decay']
                 if len(state) == 0:
                     state['step'] = 0
@@ -252,13 +256,9 @@ class Shampoo(torch.optim.Optimizer):
                             'inv_precond_{dim_id}'.format(dim_id=dim_id)
                         ] = torch.zeros(dim, dim, device=grad.device, dtype=torch.float32)
 
-                if momentum > 0:
-                    grad.mul_(1 - momentum).add_(
-                        state['momentum_buffer'], alpha=momentum
-                    )
-                state['momentum_buffer'].lerp_(g,1- momentum)
-                if weight_decay > 0:
-                    grad.add_(p.data, alpha=group['weight_decay'])
+                buf = state['momentum_buffer']
+                buf.mul_(momentum).add_(grad)
+                grad = grad.add(buf, alpha=momentum) if nesterov else buf
 
                 # See Algorithm 2 for detail
                 for dim_id, dim in enumerate(grad.size()):
@@ -274,7 +274,7 @@ class Shampoo(torch.optim.Optimizer):
 
                     g32 = grad.to(torch.float32)
                     g32_t = g32.t()
-                    precond.mul_(1-group['momentum_precond']).add_(g32 @ g32_t, alpha=group['momentum_precond'])
+                    precond.mul_(momentum_precond).add_(g32 @ g32_t)
                     if state['step'] % group['update_freq'] == 0:
                         inv_precond.copy_(_matrix_power(precond,  (order*self.order_multiplier)))
 
