@@ -612,8 +612,8 @@ def main(
     data_path: str = "cifar10",       # path to store CIFAR10 data
     batch_size: int = 16192,   # batch size for training
     lr_bias: float = 0.01,            # learning rate for biases
-    lr_filters_shampoo: float = 0.04 # learning rate for filter params (Shampoo)
-    lr_filters_muon: float = 0.04    # learning rate for filter params (Muon)
+    lr_filters_shampoo: float = 0.04,# learning rate for filter params (Shampoo)
+    lr_filters_muon: float = 0.04,   # learning rate for filter params (Muon)
     lr_head: float = 0.1,             # learning rate for head/output layer
     momentum_sgd: float = 0.85,       # momentum for SGD optimizer
     momentum_shampoo: float = 0.9,    # momentum for Shampoo optimizer 
