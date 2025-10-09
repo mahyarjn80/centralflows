@@ -625,7 +625,7 @@ def main(
     momentum_shampoo: float = 0.9,    # momentum for Shampoo optimizer 
     shampoo_order: int = 2,           # order for Shampoo optimizer
     momentum_muon: float = 0.9,       # momentum for Muon optimizer
-    weight_decay: float = 1e-1,     # weight decay
+    weight_decay: float = 1e-4,     # weight decay
     use_augmentation: bool = True,    # whether to use data augmentation
     label_smoothing: float = 0.2,     # label smoothing parameter
     device: str = "cuda",             # cuda or cpu
