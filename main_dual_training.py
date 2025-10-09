@@ -625,7 +625,8 @@ def main(
     momentum_shampoo: float = 0.9,    # momentum for Shampoo optimizer 
     shampoo_order: int = 2,           # order for Shampoo optimizer
     momentum_muon: float = 0.9,       # momentum for Muon optimizer
-    weight_decay: float = 1e-4,     # weight decay
+    weight_decay: float = 1,     # weight decay
+    weight_decay_misc: float = 1e-4,     # weight decay for miscellaneous parameters
     use_augmentation: bool = True,    # whether to use data augmentation
     label_smoothing: float = 0.2,     # label smoothing parameter
     device: str = "cuda",             # cuda or cpu
@@ -686,16 +687,16 @@ def main(
     
     # Shampoo model optimizers
     filter_params_shampoo = [p for n, p in model_shampoo.named_parameters() 
-                             if ((p.ndim >= 2 and "embed" not in n) and p.requires_grad)]
+                             if ((p.ndim >= 2 and "embed" not in n and "head" not in n) and p.requires_grad)]
     head_params_shampoo = [p for n, p in model_shampoo.named_parameters() 
                            if (("embed" in n or 'cls' in n or 'head' in n) and p.requires_grad and p.ndim >= 2)]
     bias_params_shampoo = [p for p in model_shampoo.parameters() if p.requires_grad and p.ndim < 2]
     
     param_configs_sgd_shampoo = []
     if len(bias_params_shampoo) > 0:
-        param_configs_sgd_shampoo.append(dict(params=bias_params_shampoo, lr=lr_bias, weight_decay=weight_decay/lr_bias))
+        param_configs_sgd_shampoo.append(dict(params=bias_params_shampoo, lr=lr_bias, weight_decay=weight_decay_misc/lr_bias))
     if len(head_params_shampoo) > 0:
-        param_configs_sgd_shampoo.append(dict(params=head_params_shampoo, lr=lr_head, weight_decay=weight_decay/lr_head))
+        param_configs_sgd_shampoo.append(dict(params=head_params_shampoo, lr=lr_head, weight_decay=weight_decay_misc/lr_head))
     
     optimizer_adam_shampoo = Adam(param_configs_sgd_shampoo, lr=lr_bias, betas=(0.9, 0.95), 
                                    eps=1e-10, weight_decay=weight_decay) if param_configs_sgd_shampoo else None
@@ -706,7 +707,7 @@ def main(
     
     # Muon model optimizers
     filter_params_muon = [p for n, p in model_muon.named_parameters() 
-                          if ((p.ndim >= 2 and "embed" not in n) and p.requires_grad)]
+                          if ((p.ndim >= 2 and "embed" not in n and "head" not in n) and p.requires_grad)]
     head_params_muon = [p for n, p in model_muon.named_parameters() 
                         if (("embed" in n or 'cls' in n or 'head' in n) and p.requires_grad and p.ndim >= 2)]
     bias_params_muon = [p for p in model_muon.parameters() if p.requires_grad and p.ndim < 2]
@@ -734,9 +735,9 @@ def main(
     
     # Get parameter names for SVD tracking (only filter parameters)
     filter_param_names_shampoo = [n for n, p in model_shampoo.named_parameters() 
-                                  if ((p.ndim >= 2 and "embed" not in n) and p.requires_grad)]
-    filter_param_names_muon = [n for n, p in model_muon.named_parameters() 
-                               if ((p.ndim >= 2 and "embed" not in n) and p.requires_grad)]
+                                  if ((p.ndim >= 2 and "embed" not in n and "head" not in n) and p.requires_grad)]
+    filter_param_names_muon = [p for n, p in model_muon.named_parameters() 
+                                if ((p.ndim >= 2 and "embed" not in n and "head" not in n) and p.requires_grad)]
     
     # Storage for logging
     RUN_LOGS_SHAMPOO = []
@@ -780,7 +781,7 @@ def main(
             # Update learning rate
             for opt in optimizers_shampoo:
                 for group in opt.param_groups:
-                    group["lr"] = group["initial_lr"] *1#(1- step / total_train_steps)
+                    group["lr"] = group["initial_lr"] * (1- step / total_train_steps)
             
             # Optimizer step
             for opt in optimizers_shampoo:
@@ -806,7 +807,7 @@ def main(
             # Update learning rate
             for opt in optimizers_muon:
                 for group in opt.param_groups:
-                    group["lr"] = group["initial_lr"]# (1 - step / total_train_steps)
+                    group["lr"] = group["initial_lr"] * (1 - step / total_train_steps)
             
             # Optimizer step
             for opt in optimizers_muon:
