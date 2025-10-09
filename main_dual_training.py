@@ -714,9 +714,9 @@ def main(
     
     param_configs_sgd_muon = []
     if len(bias_params_muon) > 0:
-        param_configs_sgd_muon.append(dict(params=bias_params_muon, lr=lr_bias, weight_decay=weight_decay/lr_bias))
+        param_configs_sgd_muon.append(dict(params=bias_params_muon, lr=lr_bias, weight_decay=weight_decay_misc/lr_bias))
     if len(head_params_muon) > 0:
-        param_configs_sgd_muon.append(dict(params=head_params_muon, lr=lr_head, weight_decay=weight_decay/lr_head))
+        param_configs_sgd_muon.append(dict(params=head_params_muon, lr=lr_head, weight_decay=weight_decay_misc/lr_head))
     
     optimizer_adam_muon = Adam(param_configs_sgd_muon, lr=lr_bias, betas=(0.9, 0.95), 
                                eps=1e-10, weight_decay=weight_decay) if param_configs_sgd_muon else None
