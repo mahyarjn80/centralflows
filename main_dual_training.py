@@ -212,10 +212,9 @@ class Shampoo(torch.optim.Optimizer):
             weight_decay=weight_decay,
             epsilon=epsilon,
             update_freq=update_freq,
-
+            nesterov=nesterov,
         )
         self.order_multiplier = order_multiplier
-        self.nesterov = nesterov
         super(Shampoo, self).__init__(params, defaults)
 
     def step(self, closure = None):
