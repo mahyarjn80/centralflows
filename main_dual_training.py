@@ -190,6 +190,7 @@ class Shampoo(torch.optim.Optimizer):
         epsilon: float = 1e-4,
         update_freq: int = 1,
         order_multiplier: int = 2,
+        nesterov: bool = True,
     ):
 
         if lr <= 0.0:
@@ -214,6 +215,7 @@ class Shampoo(torch.optim.Optimizer):
 
         )
         self.order_multiplier = order_multiplier
+        self.nesterov = nesterov
         super(Shampoo, self).__init__(params, defaults)
 
     def step(self, closure = None):
