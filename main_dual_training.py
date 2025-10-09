@@ -736,8 +736,8 @@ def main(
     # Get parameter names for SVD tracking (only filter parameters)
     filter_param_names_shampoo = [n for n, p in model_shampoo.named_parameters() 
                                   if ((p.ndim >= 2 and "embed" not in n and "head" not in n) and p.requires_grad)]
-    filter_param_names_muon = [p for n, p in model_muon.named_parameters() 
-                                if ((p.ndim >= 2 and "embed" not in n and "head" not in n) and p.requires_grad)]
+    filter_param_names_muon = [n for n, p in model_muon.named_parameters() 
+                                  if ((p.ndim >= 2 and "embed" not in n and "head" not in n) and p.requires_grad)]
     
     # Storage for logging
     RUN_LOGS_SHAMPOO = []
