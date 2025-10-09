@@ -359,7 +359,7 @@ def zeropower_via_newtonschulz5(G, steps=5, eps=1e-7):
         A = X @ X.T
         B = b * A + c * A @ A
         X = a * X + B @ X
-    if G.size(-2) > G.size(1):
+    if G.size(-2) > G.size(-1):
         X = X.mT
     return X
 

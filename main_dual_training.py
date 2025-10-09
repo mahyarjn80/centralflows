@@ -355,7 +355,7 @@ def zeropower_via_newtonschulz5(G, steps=5, eps=1e-7):
         A = X @ X.T
         B = b * A + c * A @ A
         X = a * X + B @ X
-    if G.size(-2) > G.size(1):
+    if G.size(-2) > G.size(-1):
         X = X.mT
     return X
 
@@ -619,7 +619,7 @@ def main(
     momentum_shampoo: float = 0.9,    # momentum for Shampoo optimizer 
     shampoo_order: int = 2,           # order for Shampoo optimizer
     momentum_muon: float = 0.9,       # momentum for Muon optimizer
-    weight_decay: float = 0.5,       # weight decay
+    weight_decay: float = 1e-4,       # weight decay
     use_augmentation: bool = True,    # whether to use data augmentation
     label_smoothing: float = 0.2,     # label smoothing parameter
     device: str = "cuda",             # cuda or cpu
