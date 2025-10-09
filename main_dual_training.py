@@ -250,13 +250,13 @@ class Shampoo(torch.optim.Optimizer):
                         ] = torch.zeros(dim, dim, device=grad.device, dtype=torch.float32)
 
                 if momentum > 0:
-                    grad.mul_(1 - momentum).add_(
-                        state['momentum_buffer'], alpha=momentum
-                    )
-                state['momentum_buffer'].lerp_(grad, 1-momentum)
+                    state['momentum_buffer'].lerp_(grad, 1-momentum)
 
-                if weight_decay > 0:
-                    grad.add_(p.data, alpha=group['weight_decay'])
+                update = grad.lerp(state['momentum_buffer'], momentum) if group['nesterov'] else state['momentum_buffer']
+                update = update*(1/(1-momentum**(state['step']+2))) if group['nesterov'] else update*(1/(1-momentum**(state['step']+1)))
+                update32 = update.to(torch.float32)
+                # if weight_decay > 0:
+                #     grad.add_(p.data, alpha=group['weight_decay'])
 
                 # See Algorithm 2 for detail
                 for dim_id, dim in enumerate(grad.size()):
@@ -267,9 +267,7 @@ class Shampoo(torch.optim.Optimizer):
                     grad = grad.transpose_(0, dim_id).contiguous()
                     transposed_size = grad.size()
                     grad = grad.view(dim, -1)
-
                     grad_t = grad.t()
-
                     g32 = grad.to(torch.float32)
                     g32_t = g32.t()
                     precond.add_(g32 @ g32_t)
@@ -278,14 +276,14 @@ class Shampoo(torch.optim.Optimizer):
 
                     if dim_id == order - 1:
                         # finally
-                        g32 = g32.t() @ inv_precond
+                        update32 = update32.t() @ inv_precond
                         # grad: (-1, last_dim)
-                        grad = g32.view(original_size).to(grad.dtype)
+                        grad = update32.view(original_size).to(grad.dtype)
                     else:
                         # if not final
-                        g32 = inv_precond @ g32
+                        update32 = inv_precond @ update32
                         # grad (dim, -1)
-                        grad = g32.view(transposed_size).to(grad.dtype)
+                        grad = update32.view(transposed_size).to(grad.dtype)
 
                 state['step'] += 1
                 # state['momentum_buffer'] = grad
@@ -382,6 +380,7 @@ class Muon(torch.optim.Optimizer):
                 state = self.state[p]
 
                 if 'momentum_buffer' not in state.keys():
+                    state['step'] = 0
                     state['momentum_buffer'] = torch.zeros_like(g)
                 buf = state['momentum_buffer']  
                 # buf.mul_(momentum).add_(g)
@@ -389,9 +388,11 @@ class Muon(torch.optim.Optimizer):
 
                 buf.lerp_(g, 1 - momentum)
                 update = g.lerp_(buf, momentum) if group['nesterov'] else buf
+                update = update*(1/(1-momentum**(state['step']+2))) if group['nesterov'] else update*(1/(1-momentum**(state['step']+1)))
                 # p.data.mul_(len(p.data)**0.5 / p.data.norm()) # normalize the weight
                 update = zeropower_via_newtonschulz5(update.reshape(len(g), -1)).view(g.shape) # whiten the update
                 update *= max(1, g.size(-2) / g.size(-1))**0.5
+                state['step'] += 1
                 p.data.mul_(1-lr*group['weight_decay'])
                 p.data.add_(update, alpha=-lr) # take a step
 
@@ -612,14 +613,14 @@ def main(
     data_path: str = "cifar10",       # path to store CIFAR10 data
     batch_size: int = 16192,   # batch size for training
     lr_bias: float = 0.01,            # learning rate for biases
-    lr_filters_shampoo: float = 0.001,    # learning rate for filter params (Shampoo)
-    lr_filters_muon: float = 0.001,    # learning rate for filter params (Muon)
+    lr_filters_shampoo: float = 0.0005,    # learning rate for filter params (Shampoo)
+    lr_filters_muon: float = 0.0005,    # learning rate for filter params (Muon)
     lr_head: float = 0.01,        # learning rate for head/output layer
     momentum_sgd: float = 0.85,       # momentum for SGD optimizer
     momentum_shampoo: float = 0.9,    # momentum for Shampoo optimizer 
     shampoo_order: int = 2,           # order for Shampoo optimizer
     momentum_muon: float = 0.9,       # momentum for Muon optimizer
-    weight_decay: float = 1e-1,     # weight decay
+    weight_decay: float = 1,     # weight decay
     use_augmentation: bool = True,    # whether to use data augmentation
     label_smoothing: float = 0.2,     # label smoothing parameter
     device: str = "cuda",             # cuda or cpu
@@ -682,7 +683,7 @@ def main(
     filter_params_shampoo = [p for n, p in model_shampoo.named_parameters() 
                              if ((p.ndim >= 2 and "embed" not in n) and p.requires_grad)]
     head_params_shampoo = [p for n, p in model_shampoo.named_parameters() 
-                           if (("embed" in n or 'cls' in n) and p.requires_grad and p.ndim >= 2)]
+                           if (("embed" in n or 'cls' in n or 'head' in n) and p.requires_grad and p.ndim >= 2)]
     bias_params_shampoo = [p for p in model_shampoo.parameters() if p.requires_grad and p.ndim < 2]
     
     param_configs_sgd_shampoo = []
@@ -702,7 +703,7 @@ def main(
     filter_params_muon = [p for n, p in model_muon.named_parameters() 
                           if ((p.ndim >= 2 and "embed" not in n) and p.requires_grad)]
     head_params_muon = [p for n, p in model_muon.named_parameters() 
-                        if (("embed" in n or 'cls' in n) and p.requires_grad and p.ndim >= 2)]
+                        if (("embed" in n or 'cls' in n or 'head' in n) and p.requires_grad and p.ndim >= 2)]
     bias_params_muon = [p for p in model_muon.parameters() if p.requires_grad and p.ndim < 2]
     
     param_configs_sgd_muon = []
