@@ -637,7 +637,9 @@ def main(
         code = f.read()
     
     # collect configs that were passed in
-    config = convert_dataclasses(locals())
+    # Filter out file handles and other unpicklable objects
+    config = convert_dataclasses({k: v for k, v in locals().items() 
+                                   if k not in ['f', 'code']})
     config["cmd"] = " ".join(sys.argv)
     
     # set random seed
