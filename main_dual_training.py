@@ -612,9 +612,9 @@ def main(
     data_path: str = "cifar10",       # path to store CIFAR10 data
     batch_size: int = 16192,   # batch size for training
     lr_bias: float = 0.01,            # learning rate for biases
-    lr_filters_shampoo: float = 0.04,# learning rate for filter params (Shampoo)
-    lr_filters_muon: float = 0.04,   # learning rate for filter params (Muon)
-    lr_head: float = 0.1,             # learning rate for head/output layer
+    lr_filters_shampoo: float = 0.001,    # learning rate for filter params (Shampoo)
+    lr_filters_muon: float = 0.001,    # learning rate for filter params (Muon)
+    lr_head: float = 0.01,        # learning rate for head/output layer
     momentum_sgd: float = 0.85,       # momentum for SGD optimizer
     momentum_shampoo: float = 0.9,    # momentum for Shampoo optimizer 
     shampoo_order: int = 2,           # order for Shampoo optimizer
@@ -652,7 +652,7 @@ def main(
     aug = dict(flip=True, translate=2) if use_augmentation else {}
     train_loader = CifarLoader(data_path, train=True, batch_size=batch_size, aug=aug)
     test_loader = CifarLoader(data_path, train=False, batch_size=2000)
-    batch_sweep_count = 30
+    batch_sweep_count = 300
     total_train_steps = ceil(batch_sweep_count * len(train_loader))
     total_epochs = ceil(total_train_steps / len(train_loader))
 
