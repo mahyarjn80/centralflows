@@ -625,7 +625,7 @@ def main(
     device: str = "cuda",             # cuda or cpu
     seed: int = 0,                    # random seed
     save_results: bool = True,        # whether to save results
-    svd_freq: int = 50,               # how often to record singular values (in steps)
+    svd_freq: int = 20,               # how often to record singular values (in steps)
     total_train_steps: int = 400,     # total training steps
 ):
     print("=" * 80)
@@ -650,6 +650,8 @@ def main(
     aug = dict(flip=True, translate=2) if use_augmentation else {}
     train_loader = CifarLoader(data_path, train=True, batch_size=batch_size, aug=aug)
     test_loader = CifarLoader(data_path, train=False, batch_size=2000)
+    batch_sweep_count = 8
+    total_train_steps = ceil(batch_sweep_count * len(train_loader))
     total_epochs = ceil(total_train_steps / len(train_loader))
 
     print(f"  - Training samples: {len(train_loader.images)}")
