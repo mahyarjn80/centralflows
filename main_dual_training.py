@@ -268,7 +268,11 @@ class Shampoo(torch.optim.Optimizer):
                     grad = grad.transpose_(0, dim_id).contiguous()
                     transposed_size = grad.size()
                     grad = grad.view(dim, -1)
-                    grad_t = grad.t()
+
+                    update32 = update32.transpose_(0, dim_id).contiguous()
+                    update32 = update32.view(dim, -1)
+
+
                     g32 = grad.to(torch.float32)
                     g32_t = g32.t()
                     precond.add_(g32 @ g32_t)
@@ -284,7 +288,7 @@ class Shampoo(torch.optim.Optimizer):
                         # if not final
                         update32 = inv_precond @ update32
                         # grad (dim, -1)
-                        grad = update32.view(transposed_size).to(grad.dtype)
+                        update32 = update32.view(transposed_size).to(grad.dtype)
 
                 state['step'] += 1
                 # state['momentum_buffer'] = grad
