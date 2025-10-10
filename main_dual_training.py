@@ -772,7 +772,8 @@ def main(
     RUN_LOGS_SHAMPOO = []
     RUN_LOGS_MUON = []
     RUN_LOGS_SHAMPOO2 = []
-    SINGULAR_VALUES_SHAMPOO = []  # List of (step, sv_dict)
+    SINGULAR_VALUES_SHAMPOO = []
+    SINGULAR_VALUES_SHAMPOO2 = [] # List of (step, sv_dict)
     SINGULAR_VALUES_MUON = []     # List of (step, sv_dict)
     
     # Print header
