@@ -1,4 +1,5 @@
 from .base import Architecture
+from .cifarnet import CifarNet
 from .cnn import CNN
 from .lstm import LSTM
 from .mamba import Mamba

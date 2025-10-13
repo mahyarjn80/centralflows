@@ -1,24 +1,26 @@
 """
-Main training script for dual model training: Shampoo vs Muon
-Trains two models simultaneously and tracks singular values of weight matrices.
+Main training script for multi-model training with configurable optimizers.
+Trains multiple models simultaneously with different optimizers and tracks metrics.
 
 This script:
-- Trains one model with Shampoo optimizer
-- Trains one model with Muon optimizer
-- Records histogram of singular values every 50 steps for both models
+- Trains multiple models with user-specified optimizers
+- Records metrics and singular values
+- Uses the dual_training_loggers infrastructure
 - Compares their performance side-by-side
 
 Example usage:
-    python main_dual_training.py --arch mlp --epochs 100 --batch-size 2000
-    python main_dual_training.py --arch cnn --epochs 50 --use-augmentation
+    python main_dual_training.py --arch mlp
+    python main_dual_training.py --arch cnn --use-augmentation
 """
 
 import os
 import sys
 import uuid
 from math import ceil
-from typing import Union
+from typing import Union, List, Dict, Any
+from dataclasses import dataclass
 import pickle
+import json
 
 import numpy as np
 import torch
@@ -28,8 +30,10 @@ import torchvision.transforms as T
 import tyro
 from tqdm import trange
 
-from src.architectures import CNN, MLP, VIT, LSTM, Mamba, Transformer, Resnet
+from src.architectures import CNN, MLP, VIT, LSTM, Mamba, Transformer, Resnet, CifarNet
+from src.advanced_optimizers import Shampoo, Muon, Adam
 from src.utils import convert_dataclasses
+from src.dual_training_loggers import create_default_loggers, LossAndAccuracyLogger
 
 # os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
 # torch.backends.cudnn.allow_tf32 = False
@@ -494,6 +498,149 @@ class CifarLoader:
 
 
 #############################################
+#          Optimizer Configuration          #
+#############################################
+
+@dataclass
+class MuonConfig:
+    """Configuration for Muon optimizer."""
+    lr: float = 0.0005
+    momentum: float = 0.9
+    
+    def __str__(self):
+        return f"Muon_lr{self.lr}_mom{self.momentum}"
+
+@dataclass  
+class ShampooConfig:
+    """Configuration for Shampoo optimizer."""
+    lr: float = 0.0005
+    momentum: float = 0.9
+    order_multiplier: int = 2
+    
+    def __str__(self):
+        return f"Shampoo_lr{self.lr}_mom{self.momentum}_order{self.order_multiplier}"
+
+@dataclass
+class AdamConfig:
+    """Configuration for Adam optimizer (used for biases/heads)."""
+    lr: float = 0.01
+    beta1: float = 0.9
+    beta2: float = 0.95
+    
+    def __str__(self):
+        return f"Adam_lr{self.lr}_b1{self.beta1}_b2{self.beta2}"
+
+
+OptimizerConfig = Union[MuonConfig, ShampooConfig, AdamConfig]
+
+
+def parse_optimizer_config(config_str: str) -> OptimizerConfig:
+    """
+    Parse optimizer config from CLI string format.
+    
+    Format: "OptimizerType:param1=value1,param2=value2,..."
+    
+    Examples:
+        "Muon:lr=0.0005,momentum=0.9"
+        "Shampoo:lr=0.0005,momentum=0.9,order_multiplier=2"
+        "Adam:lr=0.01,beta1=0.9,beta2=0.95"
+    
+    Args:
+        config_str: String specification of optimizer config
+        
+    Returns:
+        OptimizerConfig instance
+    """
+    if ':' not in config_str:
+        raise ValueError(f"Config string must contain ':' separator. Got: {config_str}")
+    
+    parts = config_str.split(':', 1)
+    opt_type = parts[0].strip().lower()
+    
+    # Parse parameters
+    params = {}
+    if len(parts) > 1 and parts[1].strip():
+        for param in parts[1].split(','):
+            param = param.strip()
+            if '=' not in param:
+                raise ValueError(f"Parameter must be in format 'key=value'. Got: {param}")
+            
+            key, val = param.split('=', 1)
+            key = key.strip()
+            val = val.strip()
+            
+            # Try to convert to appropriate type
+            try:
+                # Check if it's an integer
+                if val.isdigit() or (val.startswith('-') and val[1:].isdigit()):
+                    params[key] = int(val)
+                # Check if it's a float
+                else:
+                    params[key] = float(val)
+            except ValueError:
+                # Keep as string if conversion fails
+                params[key] = val
+    
+    # Create appropriate config
+    if opt_type == 'muon':
+        return MuonConfig(**params)
+    elif opt_type == 'shampoo':
+        return ShampooConfig(**params)
+    elif opt_type == 'adam':
+        return AdamConfig(**params)
+    else:
+        raise ValueError(
+            f"Unknown optimizer type: {opt_type}. "
+            f"Valid types: 'muon', 'shampoo', 'adam'"
+        )
+
+
+def create_optimizer(config: OptimizerConfig, filter_params, head_params, bias_params, 
+                     weight_decay, weight_decay_misc, lr_head, lr_bias):
+    """
+    Create optimizer instances based on configuration.
+    
+    Returns:
+        List of optimizer instances for this model
+    """
+    optimizers = []
+    
+    # Create Adam optimizer for biases and heads
+    param_configs_adam = []
+    if len(bias_params) > 0:
+        param_configs_adam.append(dict(params=bias_params, lr=lr_bias, weight_decay=weight_decay_misc/lr_bias))
+    if len(head_params) > 0:
+        param_configs_adam.append(dict(params=head_params, lr=lr_head, weight_decay=weight_decay_misc/lr_head))
+    
+    if param_configs_adam:
+        if isinstance(config, AdamConfig):
+            adam_opt = Adam(param_configs_adam, lr=config.lr, betas=(config.beta1, config.beta2),
+                          eps=1e-10, weight_decay=weight_decay)
+        else:
+            adam_opt = Adam(param_configs_adam, lr=lr_bias, betas=(0.9, 0.95),
+                          eps=1e-10, weight_decay=weight_decay)
+        optimizers.append(adam_opt)
+    
+    # Create main optimizer for filter params
+    if len(filter_params) > 0:
+        if isinstance(config, MuonConfig):
+            main_opt = Muon(filter_params, lr=config.lr, momentum=config.momentum,
+                          nesterov=True, weight_decay=weight_decay)
+        elif isinstance(config, ShampooConfig):
+            main_opt = Shampoo(filter_params, lr=config.lr, momentum=config.momentum,
+                             weight_decay=weight_decay, order_multiplier=config.order_multiplier)
+        elif isinstance(config, AdamConfig):
+            # If using Adam for everything
+            return optimizers  # Only use the Adam created above
+        else:
+            raise ValueError(f"Unknown optimizer config: {type(config)}")
+        
+        optimizers.append(main_opt)
+    
+    return optimizers
+
+
+#############################################
 #          Singular Value Tracking          #
 #############################################
 
@@ -610,22 +757,17 @@ def evaluate(model, loader):
 #            Main Training Loop             #
 #############################################
 
-ValidArch = Union[CNN, MLP, VIT, LSTM, Mamba, Transformer, Resnet]
+ValidArch = Union[CNN, MLP, VIT, LSTM, Mamba, Transformer, Resnet, CifarNet]
 
 
 def main(
     arch: ValidArch,        
+    optimizer_configs: List[OptimizerConfig] = None,  # List of optimizer configurations (programmatic use)
+    optimizer_configs_str: List[str] = None,          # List of optimizer config strings (CLI use)
     data_path: str = "cifar10",       # path to store CIFAR10 data
     batch_size: int = 16192,   # batch size for training
     lr_bias: float = 0.01,            # learning rate for biases
-    lr_filters_shampoo: float = 0.0005,    # learning rate for filter params (Shampoo)
-    lr_filters_muon: float = 0.0005,    # learning rate for filter params (Muon)
     lr_head: float = 0.01,        # learning rate for head/output layer
-    momentum_sgd: float = 0.85,       # momentum for SGD optimizer
-    momentum_shampoo: float = 0.9,    # momentum for Shampoo optimizer 
-    shampoo_order: int = 1, 
-    shampoo2_order: int = 2,           # order for Shampoo optimizer
-    momentum_muon: float = 0.9,       # momentum for Muon optimizer
     weight_decay: float = 1,     # weight decay
     weight_decay_misc: float = 1e-4,     # weight decay for miscellaneous parameters
     use_augmentation: bool = True,    # whether to use data augmentation
@@ -636,8 +778,27 @@ def main(
     svd_freq: int = 20,               # how often to record singular values (in steps)
     total_train_steps: int = 400,     # total training steps
 ):
+    # Parse string configs if provided via CLI
+    if optimizer_configs_str is not None:
+        try:
+            optimizer_configs = [parse_optimizer_config(s) for s in optimizer_configs_str]
+        except Exception as e:
+            print(f"Error parsing optimizer configs: {e}")
+            print("\nExpected format: 'OptimizerType:param1=value1,param2=value2'")
+            print("Examples:")
+            print("  Muon:lr=0.0005,momentum=0.9")
+            print("  Shampoo:lr=0.0005,momentum=0.9,order_multiplier=2")
+            raise
+    # Default optimizer configurations if none provided
+    elif optimizer_configs is None:
+        optimizer_configs = [
+            ShampooConfig(lr=0.0005, momentum=0.9, order_multiplier=1),
+            ShampooConfig(lr=0.0005, momentum=0.9, order_multiplier=2),
+            MuonConfig(lr=0.0005, momentum=0.9),
+        ]
+    
     print("=" * 80)
-    print("Dual Model Training: Shampoo vs Muon")
+    print(f"Multi-Model Training: {len(optimizer_configs)} Optimizers")
     print("=" * 80)
     
     # Read code for saving
@@ -650,13 +811,16 @@ def main(
                                    if k not in ['f', 'code']})
     config["cmd"] = " ".join(sys.argv)
     
+
+
+    
     # set random seed
     torch.manual_seed(seed)
     if device == "cuda":
         torch.cuda.manual_seed(seed)
     
     # load the dataset using CifarLoader
-    print("\n[1/4] Loading Data...")
+    print("\n[1/5] Loading Data...")
     aug = dict(flip=True, translate=2) if use_augmentation else {}
     train_loader = CifarLoader(data_path, train=True, batch_size=batch_size, aug=aug)
     test_loader = CifarLoader(data_path, train=False, batch_size=2000)
@@ -670,114 +834,72 @@ def main(
     print(f"  - Total steps: {total_train_steps}")
     print(f"  - Total epochs: {total_epochs}")
     
-    # instantiate TWO models (one for each optimizer)
-    print("\n[2/4] Creating Models...")
-    model_shampoo = arch.create(input_shape=(3, 32, 32), output_dim=10).to(device)
-    model_shampoo2 = arch.create(input_shape=(3, 32, 32), output_dim=10).to(device)
-    model_muon = arch.create(input_shape=(3, 32, 32), output_dim=10).to(device)
+    # Create models - one for each optimizer config
+    print("\n[2/5] Creating Models...")
+    models = {}
+    base_model = arch.create(input_shape=(3, 32, 32), output_dim=10).to(device)
+    base_state_dict = base_model.state_dict()
     
-    # Make sure both models start with the same weights
-    model_shampoo2.load_state_dict(model_shampoo.state_dict())
-    model_muon.load_state_dict(model_shampoo.state_dict())
+    for i, opt_config in enumerate(optimizer_configs):
+        model_name = f"{opt_config}"
+        model = arch.create(input_shape=(3, 32, 32), output_dim=10).to(device)
+        model.load_state_dict(base_state_dict)  # All start with same weights
+        models[model_name] = model
+        print(f"  - Model {i+1}: {model_name}")
     
     print(f"  - Architecture: {arch.__class__.__name__}")
-    print(f"  - Total parameters: {sum(p.numel() for p in model_shampoo.parameters()):,}")
+    print(f"  - Total parameters: {sum(p.numel() for p in base_model.parameters()):,}")
+    print(f"  - Number of models: {len(models)}")
     
     #############################################
-    # Setup optimizers for SHAMPOO model
+    # Setup optimizers for all models
     #############################################
-    print("\n[3/4] Setting up Optimizers...")
+    print("\n[3/5] Setting up Optimizers...")
     
-    # Shampoo model optimizers
-    filter_params_shampoo = [p for n, p in model_shampoo.named_parameters() 
+    optimizers_dict = {}  # model_name -> list of optimizers
+    filter_param_names_dict = {}  # model_name -> list of filter param names
+    
+    for model_name, (opt_config, model) in zip(models.keys(), zip(optimizer_configs, models.values())):
+        # Separate parameters by type
+        filter_params = [p for n, p in model.named_parameters() 
+                        if ((p.ndim >= 2 and "embed" not in n and "head" not in n) and p.requires_grad)]
+        head_params = [p for n, p in model.named_parameters() 
+                      if (("embed" in n or 'cls' in n or 'head' in n) and p.requires_grad and p.ndim >= 2)]
+        bias_params = [p for p in model.parameters() if p.requires_grad and p.ndim < 2]
+        
+        # Create optimizers for this model
+        opts = create_optimizer(opt_config, filter_params, head_params, bias_params,
+                               weight_decay, weight_decay_misc, lr_head, lr_bias)
+        
+        # Set initial learning rates
+        for opt in opts:
+            for group in opt.param_groups:
+                group["initial_lr"] = group["lr"]
+        
+        optimizers_dict[model_name] = opts
+        
+        # Store filter param names for SVD tracking
+        filter_param_names = [n for n, p in model.named_parameters() 
                              if ((p.ndim >= 2 and "embed" not in n and "head" not in n) and p.requires_grad)]
-    head_params_shampoo = [p for n, p in model_shampoo.named_parameters() 
-                           if (("embed" in n or 'cls' in n or 'head' in n) and p.requires_grad and p.ndim >= 2)]
-    bias_params_shampoo = [p for p in model_shampoo.parameters() if p.requires_grad and p.ndim < 2]
-    
-    param_configs_sgd_shampoo = []
-    if len(bias_params_shampoo) > 0:
-        param_configs_sgd_shampoo.append(dict(params=bias_params_shampoo, lr=lr_bias, weight_decay=weight_decay_misc/lr_bias))
-    if len(head_params_shampoo) > 0:
-        param_configs_sgd_shampoo.append(dict(params=head_params_shampoo, lr=lr_head, weight_decay=weight_decay_misc/lr_head))
-    
-    optimizer_adam_shampoo = Adam(param_configs_sgd_shampoo, lr=lr_bias, betas=(0.9, 0.95), 
-                                   eps=1e-10, weight_decay=weight_decay) if param_configs_sgd_shampoo else None
-    optimizer_shampoo = Shampoo(filter_params_shampoo, lr=lr_filters_shampoo, momentum=momentum_shampoo, 
-                                weight_decay=weight_decay, order_multiplier=shampoo_order) if len(filter_params_shampoo) > 0 else None
-    
-    optimizers_shampoo = [opt for opt in [optimizer_adam_shampoo, optimizer_shampoo] if opt is not None]
-    
-
-    # Shampoo2 model optimizers
-    filter_params_shampoo2 = [p for n, p in model_shampoo2.named_parameters() 
-                             if ((p.ndim >= 2 and "embed" not in n and "head" not in n) and p.requires_grad)]
-    head_params_shampoo2 = [p for n, p in model_shampoo2.named_parameters() 
-                           if (("embed" in n or 'cls' in n or 'head' in n) and p.requires_grad and p.ndim >= 2)]
-    bias_params_shampoo2 = [p for p in model_shampoo2.parameters() if p.requires_grad and p.ndim < 2]
-    
-    param_configs_sgd_shampoo2 = []
-    if len(bias_params_shampoo2) > 0:
-        param_configs_sgd_shampoo2.append(dict(params=bias_params_shampoo2, lr=lr_bias, weight_decay=weight_decay_misc/lr_bias))
-    if len(head_params_shampoo2) > 0:
-        param_configs_sgd_shampoo2.append(dict(params=head_params_shampoo2, lr=lr_head, weight_decay=weight_decay_misc/lr_head))
-    
-    optimizer_adam_shampoo2 = Adam(param_configs_sgd_shampoo2, lr=lr_bias, betas=(0.9, 0.95), 
-                                   eps=1e-10, weight_decay=weight_decay) if param_configs_sgd_shampoo2 else None
-    optimizer_shampoo2 = Shampoo(filter_params_shampoo2, lr=lr_filters_shampoo, momentum=momentum_shampoo, 
-                                weight_decay=weight_decay, order_multiplier=shampoo2_order) if len(filter_params_shampoo2) > 0 else None
-    
-    optimizers_shampoo2 = [opt for opt in [optimizer_adam_shampoo2, optimizer_shampoo2] if opt is not None]
-
-
-
-    # Muon model optimizers
-    filter_params_muon = [p for n, p in model_muon.named_parameters() 
-                          if ((p.ndim >= 2 and "embed" not in n and "head" not in n) and p.requires_grad)]
-    head_params_muon = [p for n, p in model_muon.named_parameters() 
-                        if (("embed" in n or 'cls' in n or 'head' in n) and p.requires_grad and p.ndim >= 2)]
-    bias_params_muon = [p for p in model_muon.parameters() if p.requires_grad and p.ndim < 2]
-    
-    param_configs_sgd_muon = []
-    if len(bias_params_muon) > 0:
-        param_configs_sgd_muon.append(dict(params=bias_params_muon, lr=lr_bias, weight_decay=weight_decay_misc/lr_bias))
-    if len(head_params_muon) > 0:
-        param_configs_sgd_muon.append(dict(params=head_params_muon, lr=lr_head, weight_decay=weight_decay_misc/lr_head))
-    
-    optimizer_adam_muon = Adam(param_configs_sgd_muon, lr=lr_bias, betas=(0.9, 0.95), 
-                               eps=1e-10, weight_decay=weight_decay) if param_configs_sgd_muon else None
-    optimizer_muon = Muon(filter_params_muon, lr=lr_filters_muon, momentum=momentum_muon, 
-                          nesterov=True, weight_decay=weight_decay) if len(filter_params_muon) > 0 else None
-    
-    optimizers_muon = [opt for opt in [optimizer_adam_muon, optimizer_muon] if opt is not None]
-    
-    # Set initial learning rates
-    for opt in optimizers_shampoo + optimizers_muon + optimizers_shampoo2:
-        for group in opt.param_groups:
-            group["initial_lr"] = group["lr"]
-    
-    print(f"  - Shampoo model: {len(filter_params_shampoo)} filter params, {len(bias_params_shampoo)} bias params")
-    print(f"  - Shampoo2 model: {len(filter_params_shampoo2)} filter params, {len(bias_params_shampoo2)} bias params")
-    print(f"  - Muon model: {len(filter_params_muon)} filter params, {len(bias_params_muon)} bias params")
-    
-    # Get parameter names for SVD tracking (only filter parameters)
-    filter_param_names_shampoo = [n for n, p in model_shampoo.named_parameters() 
-                                  if ((p.ndim >= 2 and "embed" not in n and "head" not in n) and p.requires_grad)]
-    filter_param_names_muon = [n for n, p in model_muon.named_parameters() 
-                                  if ((p.ndim >= 2 and "embed" not in n and "head" not in n) and p.requires_grad)]
-    filter_param_names_shampoo2 = [n for n, p in model_shampoo2.named_parameters() 
-                                  if ((p.ndim >= 2 and "embed" not in n and "head" not in n) and p.requires_grad)]
+        filter_param_names_dict[model_name] = filter_param_names
+        
+        print(f"  - {model_name}: {len(filter_params)} filter, {len(head_params)} head, {len(bias_params)} bias params")
     
     # Storage for logging
-    RUN_LOGS_SHAMPOO = []
-    RUN_LOGS_MUON = []
-    RUN_LOGS_SHAMPOO2 = []
-    SINGULAR_VALUES_SHAMPOO = []
-    SINGULAR_VALUES_SHAMPOO2 = [] # List of (step, sv_dict)
-    SINGULAR_VALUES_MUON = []     # List of (step, sv_dict)
+    model_logs = {name: [] for name in models.keys()}  # Per-model training logs
+    singular_values_logs = {name: [] for name in models.keys()}  # Per-model SVD logs
+    
+    # Create loggers
+    print("\n[4/5] Setting up Loggers...")
+    logger_suite = create_default_loggers(
+        label_smoothing=label_smoothing,
+        track_singular_values=False  # We handle SVD separately
+    )
+    print(f"  - Process loggers: {len(logger_suite['process'])}")
+    print(f"  - Group loggers: {len(logger_suite['group'])}")
     
     # Print header
-    print("\n[4/4] Training...")
+    print("\n[5/5] Training...")
     print_columns(logging_columns_list, is_head=True)
     
     step = 0
@@ -786,183 +908,92 @@ def main(
     #############################################
     
     for epoch in range(total_epochs):
-        model_shampoo.train()
-        model_muon.train()
-        model_shampoo2.train()
+        # Set all models to train mode
+        for model in models.values():
+            model.train()
         
-        # Metrics for Shampoo model
-        epoch_loss_shampoo = 0.0
-        epoch_correct_shampoo = 0
-        epoch_samples_shampoo = 0
-        
-        # Metrics for Muon model
-        epoch_loss_muon = 0.0
-        epoch_correct_muon = 0
-        epoch_samples_muon = 0
-        
-        # Metrics for Shampoo2 model
-        epoch_loss_shampoo2 = 0.0
-        epoch_correct_shampoo2 = 0
-        epoch_samples_shampoo2 = 0
+        # Metrics for each model
+        epoch_metrics = {name: {'loss': 0.0, 'correct': 0, 'samples': 0} 
+                        for name in models.keys()}
         
         # Training
         for inputs, labels in train_loader:
-            #############################################
-            # Train Shampoo model
-            #############################################
-            outputs_shampoo = model_shampoo(inputs)
-            loss_shampoo = F.cross_entropy(outputs_shampoo, labels, 
-                                          label_smoothing=label_smoothing, reduction='sum')
-            loss_shampoo.backward()
-            
-            # Update learning rate
-            for opt in optimizers_shampoo:
-                for group in opt.param_groups:
-                    group["lr"] = group["initial_lr"] * (1- step / total_train_steps)
-            
-            # Optimizer step
-            for opt in optimizers_shampoo:
-                opt.step()
-            
-            # Zero gradients
-            model_shampoo.zero_grad(set_to_none=True)
-            
-            # Track metrics
-            with torch.no_grad():
-                epoch_loss_shampoo += loss_shampoo.item()
-                epoch_correct_shampoo += (outputs_shampoo.argmax(1) == labels).float().sum().item()
-                epoch_samples_shampoo += len(inputs) 
-
-            #############################################
-            # Train Shampoo2 model
-            #############################################
-            outputs_shampoo2 = model_shampoo2(inputs)
-            loss_shampoo2 = F.cross_entropy(outputs_shampoo2, labels, 
-                                          label_smoothing=label_smoothing, reduction='sum')
-            loss_shampoo2.backward()
-
-            # Update learning rate
-            for opt in optimizers_shampoo2:
-                for group in opt.param_groups:
-                    group["lr"] = group["initial_lr"] * (1 - step / total_train_steps)
-            
-            # Optimizer step
-            for opt in optimizers_shampoo2:
-                opt.step()
-            
-            # Zero gradients
-            model_shampoo2.zero_grad(set_to_none=True)
-            
-            # Track metrics
-            with torch.no_grad():
-                epoch_loss_shampoo2 += loss_shampoo2.item()
-                epoch_correct_shampoo2 += (outputs_shampoo2.argmax(1) == labels).float().sum().item()
-                epoch_samples_shampoo2 += len(inputs)
-            
-            #############################################
-            # Train Muon model
-            #############################################
-            outputs_muon = model_muon(inputs)
-            loss_muon = F.cross_entropy(outputs_muon, labels, 
-                                       label_smoothing=label_smoothing, reduction='sum')
-            loss_muon.backward()
-            
-            # Update learning rate
-            for opt in optimizers_muon:
-                for group in opt.param_groups:
-                    group["lr"] = group["initial_lr"] * (1 - step / total_train_steps)
-            
-            # Optimizer step
-            for opt in optimizers_muon:
-                opt.step()
-            
-            # Zero gradients
-            model_muon.zero_grad(set_to_none=True)
-            
-            # Track metrics
-            with torch.no_grad():
-                epoch_loss_muon += loss_muon.item()
-                epoch_correct_muon += (outputs_muon.argmax(1) == labels).float().sum().item()
-                epoch_samples_muon += len(inputs)
+            # Train each model
+            for model_name, model in models.items():
+                # Forward pass
+                outputs = model(inputs)
+                loss = F.cross_entropy(outputs, labels, 
+                                     label_smoothing=label_smoothing, reduction='sum')
+                loss.backward()
+                
+                # Update learning rate
+                for opt in optimizers_dict[model_name]:
+                    for group in opt.param_groups:
+                        group["lr"] = group["initial_lr"] * (1 - step / total_train_steps)
+                
+                # Optimizer step
+                for opt in optimizers_dict[model_name]:
+                    opt.step()
+                
+                # Zero gradients
+                model.zero_grad(set_to_none=True)
+                
+                # Track metrics
+                with torch.no_grad():
+                    epoch_metrics[model_name]['loss'] += loss.item()
+                    epoch_metrics[model_name]['correct'] += (outputs.argmax(1) == labels).float().sum().item()
+                    epoch_metrics[model_name]['samples'] += len(inputs)
             
             #############################################
             # Record singular values every svd_freq steps
             #############################################
             if step % svd_freq == 0:
                 print(f"\n  [Step {step}] Computing singular values...")
-                sv_shampoo = compute_singular_values(model_shampoo, filter_param_names_shampoo)
-                sv_muon = compute_singular_values(model_muon, filter_param_names_muon)
-                sv_shampoo2 = compute_singular_values(model_shampoo2, filter_param_names_shampoo2)
-                SINGULAR_VALUES_SHAMPOO.append((step, sv_shampoo))
-                SINGULAR_VALUES_SHAMPOO2.append((step, sv_shampoo2))
-                SINGULAR_VALUES_MUON.append((step, sv_muon))
-                print(f"  [Step {step}] Recorded SVD for {len(sv_shampoo)} layers (Shampoo) and {len(sv_muon)} layers (Muon)")
+                for model_name, model in models.items():
+                    sv = compute_singular_values(model, filter_param_names_dict[model_name])
+                    singular_values_logs[model_name].append((step, sv))
+                print(f"  [Step {step}] Recorded SVD for {len(models)} models")
             
             step += 1
             if step >= total_train_steps:
                 break
         
-        # Compute training metrics for Shampoo
-        train_loss_shampoo = epoch_loss_shampoo / epoch_samples_shampoo
-        train_acc_shampoo = epoch_correct_shampoo / epoch_samples_shampoo
-        
-        # Compute training metrics for Muon
-        train_loss_muon = epoch_loss_muon / epoch_samples_muon
-        train_acc_muon = epoch_correct_muon / epoch_samples_muon
-
-        # Compute training metrics for Shampoo2
-        train_loss_shampoo2 = epoch_loss_shampoo2 / epoch_samples_shampoo2
-        train_acc_shampoo2 = epoch_correct_shampoo2 / epoch_samples_shampoo2
-        
-        # Evaluate on test set
-        test_loss_shampoo, test_acc_shampoo = evaluate(model_shampoo, test_loader)
-        test_loss_muon, test_acc_muon = evaluate(model_muon, test_loader)
-        test_loss_shampoo2, test_acc_shampoo2 = evaluate(model_shampoo2, test_loader)
-        # Get current learning rate
-        current_lr_shampoo = optimizers_shampoo[0].param_groups[0]['lr'] if optimizers_shampoo else 0.0
-        current_lr_muon = optimizers_muon[0].param_groups[0]['lr'] if optimizers_muon else 0.0
-        current_lr_shampoo2 = optimizers_shampoo2[0].param_groups[0]['lr'] if optimizers_shampoo2 else 0.0
-        # Log Shampoo
-        log_dict_shampoo = {
-            'epoch': epoch,
-            'opt': 'Shampoo',
-            'train_loss': train_loss_shampoo,
-            'train_acc': train_acc_shampoo,
-            'test_loss': test_loss_shampoo,
-            'test_acc': test_acc_shampoo,
-            'lr': current_lr_shampoo,
-        }
-        print_training_details(log_dict_shampoo, is_final_entry=False)
-        RUN_LOGS_SHAMPOO.append([epoch, train_loss_shampoo, train_acc_shampoo, 
-                                 test_loss_shampoo, test_acc_shampoo, current_lr_shampoo])
-        
-        # Log Shampoo2
-        log_dict_shampoo2 = {
-            'epoch': epoch,
-            'opt': 'Shampoo2',
-            'train_loss': train_loss_shampoo2,
-            'train_acc': train_acc_shampoo2,
-            'test_loss': test_loss_shampoo2,
-            'test_acc': test_acc_shampoo2,
-            'lr': current_lr_shampoo2,
-        }
-        print_training_details(log_dict_shampoo2, is_final_entry=False)
-        RUN_LOGS_SHAMPOO2.append([epoch, train_loss_shampoo2, train_acc_shampoo2, 
-                                 test_loss_shampoo2, test_acc_shampoo2, current_lr_shampoo2])
-        
-        # Log Muon
-        log_dict_muon = {
-            'epoch': epoch,
-            'opt': 'Muon',
-            'train_loss': train_loss_muon,
-            'train_acc': train_acc_muon,
-            'test_loss': test_loss_muon,
-            'test_acc': test_acc_muon,
-            'lr': current_lr_muon,
-        }
-        print_training_details(log_dict_muon, is_final_entry=(epoch == total_epochs - 1))
-        RUN_LOGS_MUON.append([epoch, train_loss_muon, train_acc_muon, 
-                              test_loss_muon, test_acc_muon, current_lr_muon])
+        # Evaluate and log each model
+        for i, (model_name, model) in enumerate(models.items()):
+            # Compute training metrics
+            metrics = epoch_metrics[model_name]
+            train_loss = metrics['loss'] / metrics['samples']
+            train_acc = metrics['correct'] / metrics['samples']
+            
+            # Evaluate on test set
+            test_loss, test_acc = evaluate(model, test_loader)
+            
+            # Get current learning rate
+            current_lr = optimizers_dict[model_name][0].param_groups[0]['lr'] if optimizers_dict[model_name] else 0.0
+            
+            # Print log
+            log_dict = {
+                'epoch': epoch,
+                'opt': model_name[:15],  # Truncate if too long
+                'train_loss': train_loss,
+                'train_acc': train_acc,
+                'test_loss': test_loss,
+                'test_acc': test_acc,
+                'lr': current_lr,
+            }
+            is_last = (i == len(models) - 1) and (epoch == total_epochs - 1)
+            print_training_details(log_dict, is_final_entry=is_last)
+            
+            # Store log
+            model_logs[model_name].append({
+                'epoch': epoch,
+                'step': step,
+                'train_loss': train_loss,
+                'train_acc': train_acc,
+                'test_loss': test_loss,
+                'test_acc': test_acc,
+                'lr': current_lr,
+            })
         
         if step >= total_train_steps:
             break
@@ -974,72 +1005,104 @@ def main(
     if save_results:
         print("\n" + "=" * 80)
         print("Saving Results...")
-        log_dir = os.path.join('logs', 'dual_training_' + str(uuid.uuid4()))
+        
+        # Create descriptive directory name
+        optimizer_names = "_vs_".join([str(cfg).replace("_", "-")[:20] for cfg in optimizer_configs])
+        log_dir = os.path.join('logs', f'multi_training_{optimizer_names}_{str(uuid.uuid4())[:8]}')
         os.makedirs(log_dir, exist_ok=True)
         
         # Save configuration and code
-        log_path = os.path.join(log_dir, 'config.pt')
-        torch.save(dict(
-            code=code, 
-            config=config, 
-            test_acc_shampoo=test_acc_shampoo,
-            test_acc_muon=test_acc_muon,
-        ), log_path)
+        config_data = {
+            'code': code,
+            'config': config,
+            'optimizer_configs': [str(cfg) for cfg in optimizer_configs],
+        }
         
-        # Save metrics
-        np.save(
-            os.path.join(log_dir, "metrics_shampoo.npy"),
-            np.array(RUN_LOGS_SHAMPOO, dtype=object),
-            allow_pickle=True
-        )
-        np.save(
-            os.path.join(log_dir, "metrics_shampoo2.npy"),
-            np.array(RUN_LOGS_SHAMPOO2, dtype=object),
-            allow_pickle=True
-        )
-        np.save(
-            os.path.join(log_dir, "metrics_muon.npy"),
-            np.array(RUN_LOGS_MUON, dtype=object),
-            allow_pickle=True
-        )
+        # Add final test accuracies to config
+        for model_name in models.keys():
+            if model_logs[model_name]:
+                config_data[f'test_acc_{model_name}'] = model_logs[model_name][-1]['test_acc']
         
-        # Save singular values
-        with open(os.path.join(log_dir, "singular_values_shampoo.pkl"), 'wb') as f:
-            pickle.dump(SINGULAR_VALUES_SHAMPOO, f)
-        with open(os.path.join(log_dir, "singular_values_shampoo2.pkl"), 'wb') as f:
-            pickle.dump(SINGULAR_VALUES_SHAMPOO2, f)
-        with open(os.path.join(log_dir, "singular_values_muon.pkl"), 'wb') as f:
-            pickle.dump(SINGULAR_VALUES_MUON, f)
+        torch.save(config_data, os.path.join(log_dir, 'config.pt'))
+        
+        # Save metrics for each model
+        for model_name in models.keys():
+            # Save as numpy array (old format for compatibility)
+            metrics_array = np.array([
+                [log['epoch'], log['train_loss'], log['train_acc'], 
+                 log['test_loss'], log['test_acc'], log['lr']]
+                for log in model_logs[model_name]
+            ])
+            safe_name = model_name.replace(".", "_").replace("/", "_")
+            np.save(
+                os.path.join(log_dir, f"metrics_{safe_name}.npy"),
+                metrics_array,
+                allow_pickle=True
+            )
+            
+            # Also save as JSON for easy reading
+            with open(os.path.join(log_dir, f"metrics_{safe_name}.json"), 'w') as f:
+                json.dump(model_logs[model_name], f, indent=2)
+        
+        # Save singular values for each model
+        for model_name in models.keys():
+            safe_name = model_name.replace(".", "_").replace("/", "_")
+            with open(os.path.join(log_dir, f"singular_values_{safe_name}.pkl"), 'wb') as f:
+                pickle.dump(singular_values_logs[model_name], f)
         
         # Save models
-        torch.save(model_shampoo.state_dict(), os.path.join(log_dir, "model_shampoo.pt"))
-        torch.save(model_muon.state_dict(), os.path.join(log_dir, "model_muon.pt"))
-        torch.save(model_shampoo2.state_dict(), os.path.join(log_dir, "model_shampoo2.pt"))
+        for model_name, model in models.items():
+            safe_name = model_name.replace(".", "_").replace("/", "_")
+            torch.save(model.state_dict(), os.path.join(log_dir, f"model_{safe_name}.pt"))
+        
+        # Save a README describing the experiment
+        readme_content = f"""# Multi-Model Training Experiment
 
+## Configuration
+- Architecture: {arch.__class__.__name__}
+- Total Parameters: {sum(p.numel() for p in base_model.parameters()):,}
+- Batch Size: {batch_size}
+- Total Steps: {total_train_steps}
+- Total Epochs: {total_epochs}
+
+## Optimizers
+"""
+        for i, (opt_config, model_name) in enumerate(zip(optimizer_configs, models.keys())):
+            final_test_acc = model_logs[model_name][-1]['test_acc'] if model_logs[model_name] else 0.0
+            readme_content += f"{i+1}. {model_name}\n"
+            readme_content += f"   - Final Test Accuracy: {final_test_acc:.4f}\n"
+        
+        with open(os.path.join(log_dir, "README.md"), 'w') as f:
+            f.write(readme_content)
 
         print(f"  - Results saved to: {os.path.abspath(log_dir)}")
-        print(f"  - Config: config.pt")
-        print(f"  - Metrics: metrics_shampoo.npy, metrics_shampoo2.npy, metrics_muon.npy")
-        print(f"  - Singular values: singular_values_shampoo.pkl, singular_values_shampoo2.pkl, singular_values_muon.pkl")
-        print(f"  - Models: model_shampoo.pt, model_muon.pt")
+        print(f"  - Config: config.pt, README.md")
+        print(f"  - Metrics: metrics_*.npy and metrics_*.json for each model")
+        print(f"  - Singular values: singular_values_*.pkl for each model")
+        print(f"  - Models: model_*.pt for each model")
     
     print("\n" + "=" * 80)
     print("Training Complete!")
     print("=" * 80)
-    print(f"Final Test Accuracy (Shampoo): {test_acc_shampoo:.4f}")
-    print(f"Final Test Accuracy (Muon):    {test_acc_muon:.4f}")
-    print(f"Final Test Accuracy (Shampoo2): {test_acc_shampoo2:.4f}")
-    print(f"Difference (Shampoo - Muon):   {test_acc_shampoo - test_acc_muon:+.4f}")
+    
+    # Print final results for all models
+    for model_name in models.keys():
+        if model_logs[model_name]:
+            final_test_acc = model_logs[model_name][-1]['test_acc']
+            print(f"Final Test Accuracy ({model_name[:30]}): {final_test_acc:.4f}")
+    
     print("=" * 80)
     
-    return {
-        'test_acc_shampoo': test_acc_shampoo,
-        'test_acc_muon': test_acc_muon,
-        'test_acc_shampoo2': test_acc_shampoo2,
-        'singular_values_shampoo': SINGULAR_VALUES_SHAMPOO,
-        'singular_values_shampoo2': SINGULAR_VALUES_SHAMPOO2,
-        'singular_values_muon': SINGULAR_VALUES_MUON,
+    # Return results
+    results = {
+        'model_logs': model_logs,
+        'singular_values': singular_values_logs,
     }
+    for model_name in models.keys():
+        if model_logs[model_name]:
+            results[f'test_acc_{model_name}'] = model_logs[model_name][-1]['test_acc']
+    
+    return results
 
 
 if __name__ == "__main__":
