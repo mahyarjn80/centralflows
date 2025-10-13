@@ -813,7 +813,7 @@ def main(
     
 
 
-    
+
     # set random seed
     torch.manual_seed(seed)
     if device == "cuda":
@@ -824,7 +824,7 @@ def main(
     aug = dict(flip=True, translate=2) if use_augmentation else {}
     train_loader = CifarLoader(data_path, train=True, batch_size=batch_size, aug=aug)
     test_loader = CifarLoader(data_path, train=False, batch_size=2000)
-    batch_sweep_count = 20
+    batch_sweep_count = 1
     total_train_steps = ceil(batch_sweep_count * len(train_loader))
     total_epochs = ceil(total_train_steps / len(train_loader))
 
