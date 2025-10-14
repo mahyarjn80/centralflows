@@ -326,12 +326,12 @@ class Shampoo(torch.optim.Optimizer):
 
 
                     precond.lerp_(g32 @ g32_t, 1 - group['momentum'])
-                    precond.mul_(1/(1-group['momentum']**(state['step']+1)))
+                    p = precond.mul(1/(1-group['momentum']**(state['step']+1)))
                     
                     # Recompute matrix inverse periodically
                     if state['step'] % group['update_freq'] == 0:
                         power = order * self.order_multiplier
-                        inv_precond.copy_(_matrix_power(precond, power))
+                        inv_precond.copy_(_matrix_power(p, power))
 
                     # Apply preconditioning
                     if dim_id == order - 1:

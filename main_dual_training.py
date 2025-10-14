@@ -41,7 +41,7 @@ def main(
     optimizer_configs_str: List[str] = None,          
     optimizer_configs: List[OptimizerConfig] = None,  
     data_path: str = "cifar10",       
-    batch_size: int = 16192,   
+    batch_size: int = 2048,   
     lr_bias: float = 0.01,            
     lr_head: float = 0.01,          
     weight_decay: float = 1,     
