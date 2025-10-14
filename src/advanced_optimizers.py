@@ -344,6 +344,8 @@ class Shampoo(torch.optim.Optimizer):
 
                 state['step'] += 1
                 
+                # Apply weight decay
+                p.data.mul_(1 - group['lr'] * group['weight_decay'])
                 # Apply update
                 p.data.add_(update32.view(original_size), alpha=-group['lr'])
 
@@ -620,9 +622,10 @@ class MuonConfig:
     """
     lr: float = 0.0005
     momentum: float = 0.9
+    weight_decay: float = 0.0
     
     def __str__(self):
-        return f"Muon_lr{self.lr}_mom{self.momentum}"
+        return f"Muon_lr{self.lr}_mom{self.momentum}_wd{self.weight_decay}"
 
 
 @dataclass  
@@ -637,9 +640,9 @@ class ShampooConfig:
     lr: float = 0.0005
     momentum: float = 0.9
     order_multiplier: int = 2
-    
+    weight_decay: float = 0.0
     def __str__(self):
-        return f"Shampoo_lr{self.lr}_mom{self.momentum}_order{self.order_multiplier}"
+        return f"Shampoo_lr{self.lr}_mom{self.momentum}_order{self.order_multiplier}_wd{self.weight_decay}"
 
 
 @dataclass
