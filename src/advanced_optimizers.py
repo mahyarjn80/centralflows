@@ -313,13 +313,13 @@ class Shampoo(torch.optim.Optimizer):
                     precond = state[f'precond_{dim_id}']
                     inv_precond = state[f'inv_precond_{dim_id}']
 
-                    grad = grad.transpose_(0, dim_id).contiguous()
-                    transposed_size = grad.size()
-                    grad = grad.view(dim, -1)
-                    g32 = grad.to(torch.float32)
+                    # For Gram matrix computation: transpose grad (no in-place mutation)
+                    grad_transposed = grad.transpose(0, dim_id).contiguous()
+                    grad_flat = grad_transposed.view(dim, -1)
+                    g32 = grad_flat.to(torch.float32)
                     g32_t = g32.t()
 
-                    # Transpose to bring dimension dim_id to front
+                    # Transpose update32 to bring dimension dim_id to front (in-place is fine here)
                     update32 = update32.transpose_(0, dim_id).contiguous()
                     transposed_size = update32.size()
                     update32 = update32.view(dim, -1)
