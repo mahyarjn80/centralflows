@@ -538,7 +538,7 @@ def print_columns(columns_list, is_head=False, is_final_entry=False):
     if is_head or is_final_entry:
         print('-'*len(print_string))
 
-logging_columns_list = ['run   ', 'epoch', 'train_acc', 'val_acc', 'tta_val_acc', 'time_seconds']
+logging_columns_list = ['run   ', 'epoch', 'train_loss', 'train_acc', 'val_acc', 'tta_val_acc', 'time_seconds']
 def print_training_details(variables, is_final_entry):
     formatted = []
     for col in logging_columns_list:
@@ -672,9 +672,20 @@ def main(run, model):
 
         start_timer()
         model.train()
+        
+        # Track loss for the epoch
+        epoch_loss = 0.0
+        epoch_samples = 0
+        
         for inputs, labels in train_loader:
             outputs = model(inputs, whiten_bias_grad=(step < whiten_bias_train_steps))
-            F.cross_entropy(outputs, labels, label_smoothing=0.2, reduction='sum').backward()
+            loss = F.cross_entropy(outputs, labels, label_smoothing=0.2, reduction='sum')
+            
+            # Accumulate loss
+            epoch_loss += loss.item()
+            epoch_samples += len(inputs)
+            
+            loss.backward()
             for group in optimizer1.param_groups[:1]:
                 group["lr"] = group["initial_lr"] * (1 - step / whiten_bias_train_steps)
             for group in optimizer1.param_groups[1:]+optimizer2.param_groups:
@@ -693,6 +704,7 @@ def main(run, model):
 
         # Save the accuracy and loss from the last training batch of the epoch
         train_acc = (outputs.detach().argmax(1) == labels).float().mean().item()
+        train_loss = epoch_loss / epoch_samples if epoch_samples > 0 else float('inf')
         val_acc = evaluate(model, test_loader, tta_level=0)
         print_training_details(locals(), is_final_entry=False)
 
@@ -723,6 +735,7 @@ def main(run, model):
     tta_val_acc = evaluate(model, test_loader, tta_level=2)
     stop_timer()
     epoch = 'eval'
+    train_loss = None  # No training in eval phase
     print_training_details(locals(), is_final_entry=True)
 
 
