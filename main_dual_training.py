@@ -44,8 +44,8 @@ def main(
     batch_size: int = 2048,   
     lr_bias: float = 0.01,            
     lr_head: float = 0.1,          
-    weight_decay: float = 2e-6,     
-    weight_decay_misc: float = 2e-6,     
+    weight_decay: float = 1e-4,     
+    weight_decay_misc: float = 1e-4,     
     batch_sweep_count: int = 20,
     use_augmentation: bool = True,    
     label_smoothing: float = 0.2,     
@@ -108,8 +108,8 @@ def main(
     print(f"  - Batch size: {batch_size}")
     print(f"  - Total steps: {total_train_steps}")
     print(f"  - Total epochs: {total_epochs}")
-    weight_decay_misc = weight_decay_misc * batch_size
-    weight_decay = weight_decay * batch_size
+    # weight_decay_misc = weight_decay_misc * batch_size
+    # weight_decay = weight_decay * batch_size
     
     print("\n[2/5] Creating Models...")
     models = {}
