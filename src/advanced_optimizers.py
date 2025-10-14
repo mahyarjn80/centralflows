@@ -452,28 +452,27 @@ class Muon(torch.optim.Optimizer):
                 if nesterov:
                     update = grad.lerp(buf, momentum)
                     # Bias correction for Nesterov
-                    bias_correction = 1 / (1 - momentum ** (state['step'] + 2))
+                    #bias_correction = 1 / (1 - momentum ** (state['step'] + 2))
                 else:
                     update = buf.clone()
                     # Bias correction
-                    bias_correction = 1 / (1 - momentum ** (state['step'] + 1))
+                    #bias_correction = 1 / (1 - momentum ** (state['step'] + 1))
                 
-                #update = update * bias_correction
+                update = update * bias_correction
                 
                 # Orthogonalize: reshape to 2D, apply Newton-Schulz, reshape back
-                param_shape = grad.shape
-                if len(param_shape) >= 2:
+                if len(grad.shape) >= 2:
                     # Reshape to matrix (first dim x product of rest)
-                    update_2d = update.reshape(param_shape[0], -1)
+                    update_2d = update.view(len(update), -1)
                     
                     # Apply Newton-Schulz orthogonalization
                     update_orth_2d = zeropower_via_newtonschulz5(update_2d)
                     
                     # Reshape back
-                    update_orth = update_orth_2d.view(param_shape)
+                    update_orth = update_orth_2d.view(update.shape)
                     
                     # Scale by aspect ratio (from original Muon paper)
-                    aspect_ratio = max(1, param_shape[-2] / param_shape[-1])
+                    aspect_ratio = max(1, grad.size(-2) / grad.size(-1))
                     update_orth *= aspect_ratio ** 0.5
                 else:
                     # For 1D parameters, just use the update as-is
