@@ -306,6 +306,8 @@ class Shampoo(torch.optim.Optimizer):
                 
                 update32 = update.to(torch.float32)
 
+
+
                 # Apply Shampoo preconditioning along each dimension
                 for dim_id, dim in enumerate(grad.size()):
                     precond = state[f'precond_{dim_id}']
@@ -322,12 +324,9 @@ class Shampoo(torch.optim.Optimizer):
                     transposed_size = update32.size()
                     update32 = update32.view(dim, -1)
 
-                    # Also transpose gradient for Gram matrix update
-                    grad_transposed = grad.transpose(0, dim_id).contiguous()
-                    grad_flat = grad_transposed.view(dim, -1)
-
 
                     precond.lerp_(g32 @ g32_t, 1 - group['momentum'])
+                    precond.mul_(1/(1-group['momentum']**(state['step']+1)))
                     
                     # Recompute matrix inverse periodically
                     if state['step'] % group['update_freq'] == 0:
@@ -338,13 +337,13 @@ class Shampoo(torch.optim.Optimizer):
                     if dim_id == order - 1:
                         # Last dimension: apply from left
                         update32 = update32.t() @ inv_precond
-                        # Reshape back to original
+                        # Reshape back to original and convert to original dtype only at the end
                         update32 = update32.view(original_size).to(grad.dtype)
                     else:
                         # Intermediate dimensions: apply from right
                         update32 = inv_precond @ update32
-                        # Reshape for next iteration
-                        update32 = update32.view(transposed_size).to(grad.dtype)
+                        # Reshape for next iteration but STAY in float32
+                        update32 = update32.view(transposed_size)
 
                 state['step'] += 1
                 
