@@ -320,7 +320,7 @@ class Shampoo(torch.optim.Optimizer):
                     g32_t = g32.t()
 
                     # Transpose to bring dimension dim_id to front
-                    update32 = update32.transpose(0, dim_id).contiguous()
+                    update32 = update32.transpose_(0, dim_id).contiguous()
                     transposed_size = update32.size()
                     update32 = update32.view(dim, -1)
 
