@@ -256,7 +256,8 @@ class Shampoo(torch.optim.Optimizer):
                     state['momentum_buffer'].lerp_(grad, 1-momentum)
 
                 update = grad.lerp(state['momentum_buffer'], momentum) if group['nesterov'] else state['momentum_buffer']
-                update = update*(1/(1-momentum**(state['step']+2))) if group['nesterov'] else update*(1/(1-momentum**(state['step']+1)))
+                # Removed bias correction to match shmapooV2.py stable implementation
+                # update = update*(1/(1-momentum**(state['step']+2))) if group['nesterov'] else update*(1/(1-momentum**(state['step']+1)))
                 update32 = update.to(torch.float32)
                 # if weight_decay > 0:
                 #     grad.add_(p.data, alpha=group['weight_decay'])
@@ -394,7 +395,7 @@ class Muon(torch.optim.Optimizer):
 
                 buf.lerp_(g, 1 - momentum)
                 update = g.lerp_(buf, momentum) if group['nesterov'] else buf
-                update = update*(1/(1-momentum**(state['step']+2))) if group['nesterov'] else update*(1/(1-momentum**(state['step']+1)))
+                # update = update*(1/(1-momentum**(state['step']+2))) if group['nesterov'] else update*(1/(1-momentum**(state['step']+1)))
                 # p.data.mul_(len(p.data)**0.5 / p.data.norm()) # normalize the weight
                 update = zeropower_via_newtonschulz5(update.reshape(len(g), -1)).view(g.shape) # whiten the update
                 update *= max(1, g.size(-2) / g.size(-1))**0.5
