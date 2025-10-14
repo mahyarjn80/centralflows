@@ -201,7 +201,8 @@ def main(
 
                 # For CifarNet, control whitening bias gradient flow
                 if param_group_strategy == 'cifarnet':
-                    outputs = model(inputs, whiten_bias_grad=(step < whiten_bias_train_steps))
+                    # Clone inputs to avoid in-place modifications from whitening layer
+                    outputs = model(inputs.clone(), whiten_bias_grad=(step < whiten_bias_train_steps))
                 else:
                     outputs = model(inputs)
                     

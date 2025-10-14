@@ -296,11 +296,11 @@ class Shampoo(torch.optim.Optimizer):
                     if group['nesterov']:
                         update = grad.lerp(state['momentum_buffer'], momentum)
                         # Bias correction for Nesterov
-                        update = update * (1 / (1 - momentum ** (state['step'] + 2)))
+                        #update = update * (1 / (1 - momentum ** (state['step'] + 2)))
                     else:
                         update = state['momentum_buffer']
                         # Bias correction
-                        update = update * (1 / (1 - momentum ** (state['step'] + 1)))
+                        #update = update * (1 / (1 - momentum ** (state['step'] + 1)))
                 else:
                     update = grad
                 
@@ -326,12 +326,12 @@ class Shampoo(torch.optim.Optimizer):
 
 
                     precond.lerp_(g32 @ g32_t, 1 - group['momentum'])
-                    precond_corrected = precond.mul(1/(1-group['momentum']**(state['step']+1)))
+                    #precond_corrected = precond.mul(1/(1-group['momentum']**(state['step']+1)))
                     
                     # Recompute matrix inverse periodically
                     if state['step'] % group['update_freq'] == 0:
                         power = order * self.order_multiplier
-                        inv_precond.copy_(_matrix_power(precond_corrected, power))
+                        inv_precond.copy_(_matrix_power(precond, power))
 
                     # Apply preconditioning
                     if dim_id == order - 1:
@@ -458,7 +458,7 @@ class Muon(torch.optim.Optimizer):
                     # Bias correction
                     bias_correction = 1 / (1 - momentum ** (state['step'] + 1))
                 
-                update = update * bias_correction
+                #update = update * bias_correction
                 
                 # Orthogonalize: reshape to 2D, apply Newton-Schulz, reshape back
                 param_shape = grad.shape
