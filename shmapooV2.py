@@ -765,7 +765,7 @@ if __name__ == "__main__":
     model.compile(mode='max-autotune')
 
     print_columns(logging_columns_list, is_head=True)
-    main('warmup', model)
+    # main('warmup', model)
     accs = torch.tensor([main(run, model) for run in range(200)])
     print('Mean: %.4f    Std: %.4f' % (accs.mean(), accs.std()))
 
