@@ -311,6 +311,12 @@ class Shampoo(torch.optim.Optimizer):
                     precond = state[f'precond_{dim_id}']
                     inv_precond = state[f'inv_precond_{dim_id}']
 
+                    grad = grad.transpose_(0, dim_id).contiguous()
+                    transposed_size = grad.size()
+                    grad = grad.view(dim, -1)
+                    g32 = grad.to(torch.float32)
+                    g32_t = g32.t()
+
                     # Transpose to bring dimension dim_id to front
                     update32 = update32.transpose(0, dim_id).contiguous()
                     transposed_size = update32.size()
@@ -320,10 +326,8 @@ class Shampoo(torch.optim.Optimizer):
                     grad_transposed = grad.transpose(0, dim_id).contiguous()
                     grad_flat = grad_transposed.view(dim, -1)
 
-                    # Update Gram matrix: G ← G + g g^T
-                    g32 = grad_flat.to(torch.float32)
-                    g32_t = g32.t()
-                    precond.add_(g32 @ g32_t)
+
+                    precond.lerp_(g32 @ g32_t, 1 - group['momentum'])
                     
                     # Recompute matrix inverse periodically
                     if state['step'] % group['update_freq'] == 0:
@@ -642,7 +646,7 @@ class ShampooConfig:
     order_multiplier: int = 2
     weight_decay: float = 0.0
 
-    
+
     def __str__(self):
         return f"Shampoo_lr{self.lr}_mom{self.momentum}_order{self.order_multiplier}_wd{self.weight_decay}"
 

@@ -40,7 +40,6 @@ def main(
     arch: ValidArch,
     optimizer_configs_str: List[str] = None,          
     optimizer_configs: List[OptimizerConfig] = None,  
-    param_group_strategy: str = "vit",  # Strategy for grouping parameters ('vit' or 'cifarnet')
     data_path: str = "cifar10",       
     batch_size: int = 16192,   
     lr_bias: float = 0.01,            
@@ -74,6 +73,13 @@ def main(
             ShampooConfig(lr=0.0005, momentum=0.9, order_multiplier=2),
             MuonConfig(lr=0.0005, momentum=0.9),
         ]
+    
+    # Automatically determine parameter grouping strategy based on architecture
+    arch_name = arch.__class__.__name__.lower()
+    if arch_name == 'cifarnet':
+        param_group_strategy = 'cifarnet'
+    else:
+        param_group_strategy = 'vit'  # Default for all other architectures
     
     print("=" * 80)
     print(f"Multi-Model Training: {len(optimizer_configs)} Optimizers")
@@ -121,7 +127,7 @@ def main(
     
 
     print("\n[3/5] Setting up Optimizers...")
-    print(f"  - Using parameter grouping strategy: '{param_group_strategy}'")
+    print(f"  - Using parameter grouping strategy: '{param_group_strategy}' (auto-detected from {arch.__class__.__name__})")
     
     optimizers_dict = {}  
     filter_param_names_dict = {}  
