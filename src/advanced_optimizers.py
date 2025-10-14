@@ -627,7 +627,7 @@ class MuonConfig:
     momentum: float = 0.9
     
     def __str__(self):
-        return f"Muon_lr{self.lr}_mom{self.momentum}_wd{self.weight_decay}"
+        return f"Muon_lr{self.lr}_mom{self.momentum}"
 
 
 @dataclass  
@@ -645,7 +645,7 @@ class ShampooConfig:
 
 
     def __str__(self):
-        return f"Shampoo_lr{self.lr}_mom{self.momentum}_order{self.order_multiplier}_wd{self.weight_decay}"
+        return f"Shampoo_lr{self.lr}_mom{self.momentum}_order{self.order_multiplier}"
 
 
 @dataclass
