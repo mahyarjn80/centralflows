@@ -325,7 +325,8 @@ class Shampoo(torch.optim.Optimizer):
                     update32 = update32.view(dim, -1)
 
 
-                    precond.lerp_(g32 @ g32_t, 1 - group['momentum'])
+                    #precond.lerp_(g32 @ g32_t, 1 - group['momentum'])
+                    precond.add_(g32 @ g32_t)
                     #precond_corrected = precond.mul(1/(1-group['momentum']**(state['step']+1)))
                     
                     # Recompute matrix inverse periodically
