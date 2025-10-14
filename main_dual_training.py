@@ -47,6 +47,7 @@ def main(
     lr_head: float = 0.01,          
     weight_decay: float = 1,     
     weight_decay_misc: float = 1e-4,     
+    batch_sweep_count: int = 20,
     use_augmentation: bool = True,    
     label_smoothing: float = 0.2,     
     device: str = "cuda",             
@@ -94,7 +95,6 @@ def main(
     aug = dict(flip=True, translate=2) if use_augmentation else {}
     train_loader = CifarLoader(data_path, train=True, batch_size=batch_size, aug=aug)
     test_loader = CifarLoader(data_path, train=False, batch_size=2000)
-    batch_sweep_count = 1
     total_train_steps = ceil(batch_sweep_count * len(train_loader))
     total_epochs = ceil(total_train_steps / len(train_loader))
     print(f"  - Training samples: {len(train_loader.images)}")
