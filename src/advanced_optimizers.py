@@ -625,7 +625,6 @@ class MuonConfig:
     """
     lr: float = 0.0005
     momentum: float = 0.9
-    weight_decay: float = 0.0
     
     def __str__(self):
         return f"Muon_lr{self.lr}_mom{self.momentum}_wd{self.weight_decay}"
@@ -643,7 +642,6 @@ class ShampooConfig:
     lr: float = 0.0005
     momentum: float = 0.9
     order_multiplier: int = 2
-    weight_decay: float = 0.0
 
 
     def __str__(self):
@@ -840,7 +838,7 @@ def create_optimizer(
                 lr=config.lr,
                 momentum=config.momentum,
                 nesterov=True,
-                weight_decay=config.weight_decay
+                weight_decay=weight_decay
             )
             optimizers.append(main_opt)
         elif isinstance(config, ShampooConfig):
@@ -848,7 +846,7 @@ def create_optimizer(
                 filter_params,
                 lr=config.lr,
                 momentum=config.momentum,
-                weight_decay=config.weight_decay,
+                weight_decay=weight_decay,
                 order_multiplier=config.order_multiplier
             )
             optimizers.append(main_opt)
