@@ -735,10 +735,10 @@ def main(
                                    if k not in ['f', 'code']})
     config["cmd"] = " ".join(sys.argv)
     
-    # set random seed
-    torch.manual_seed(seed)
-    if device == "cuda":
-        torch.cuda.manual_seed(seed)
+    # # set random seed
+    # torch.manual_seed(seed)
+    # if device == "cuda":
+    #     torch.cuda.manual_seed(seed)
     
     # load the dataset using CifarLoader
     print("\n[1/4] Loading Data...")
