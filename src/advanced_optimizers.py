@@ -452,13 +452,13 @@ class Muon(torch.optim.Optimizer):
                 if nesterov:
                     update = grad.lerp(buf, momentum)
                     # Bias correction for Nesterov
-                    #bias_correction = 1 / (1 - momentum ** (state['step'] + 2))
+                    bias_correction = 1 / (1 - momentum ** (state['step'] + 2))
                 else:
                     update = buf.clone()
                     # Bias correction
-                    #bias_correction = 1 / (1 - momentum ** (state['step'] + 1))
+                    bias_correction = 1 / (1 - momentum ** (state['step'] + 1))
                 
-                update = update * bias_correction
+                #update = update * bias_correction
                 
                 # Orthogonalize: reshape to 2D, apply Newton-Schulz, reshape back
                 if len(grad.shape) >= 2:
