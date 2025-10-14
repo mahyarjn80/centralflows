@@ -24,6 +24,7 @@ from src.dual_training_loggers import (
 )
 from src.data import CifarLoader, CIFAR_MEAN, CIFAR_STD
 from src.eval import evaluate
+from src.param_groups import get_param_groups
 # os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
 # torch.backends.cudnn.allow_tf32 = False
 # torch.backends.cuda.matmul.allow_tf32 = False
@@ -39,6 +40,7 @@ def main(
     arch: ValidArch,
     optimizer_configs_str: List[str] = None,          
     optimizer_configs: List[OptimizerConfig] = None,  
+    param_group_strategy: str = "vit",  # Strategy for grouping parameters ('vit' or 'cifarnet')
     data_path: str = "cifar10",       
     batch_size: int = 16192,   
     lr_bias: float = 0.01,            
@@ -119,17 +121,15 @@ def main(
     
 
     print("\n[3/5] Setting up Optimizers...")
+    print(f"  - Using parameter grouping strategy: '{param_group_strategy}'")
+    
     optimizers_dict = {}  
     filter_param_names_dict = {}  
     
     for model_name, (opt_config, model) in zip(models.keys(), zip(optimizer_configs, models.values())):
 
-        filter_params = [p for n, p in model.named_parameters() 
-                        if ((p.ndim >= 2 and "embed" not in n and "head" not in n) and p.requires_grad)]
-        head_params = [p for n, p in model.named_parameters() 
-                      if (("embed" in n or 'cls' in n or 'head' in n) and p.requires_grad and p.ndim >= 2)]
-        bias_params = [p for p in model.parameters() if p.requires_grad and p.ndim < 2]
-        
+        # Use the parameter grouping strategy
+        filter_params, head_params, bias_params = get_param_groups(model, param_group_strategy)
         opts = create_optimizer(opt_config, filter_params, head_params, bias_params,
                                weight_decay, weight_decay_misc, lr_head, lr_bias)
         
@@ -141,8 +141,8 @@ def main(
         optimizers_dict[model_name] = opts
         
 
-        filter_param_names = [n for n, p in model.named_parameters() 
-                             if ((p.ndim >= 2 and "embed" not in n and "head" not in n) and p.requires_grad)]
+        # Store filter param names for SVD tracking (must match filter_params)
+        filter_param_names = [n for n, p in model.named_parameters() if p in filter_params]
         filter_param_names_dict[model_name] = filter_param_names
         
         print(f"  - {model_name}: {len(filter_params)} filter, {len(head_params)} head, {len(bias_params)} bias params")

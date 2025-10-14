@@ -746,11 +746,11 @@ def create_optimizer(
     Create optimizer instances based on configuration.
     
     This function creates separate optimizers for different parameter groups:
-    - Biases and head/embedding parameters use Adam
-    - Filter/weight parameters use the specified optimizer (Muon, Shampoo, or Adam)
+    - Filter/weight parameters use the specified optimizer (Muon or Shampoo)
+    - Biases and head/embedding parameters ALWAYS use Adam (with default settings)
     
     Args:
-        config: Optimizer configuration (MuonConfig, ShampooConfig, or AdamConfig)
+        config: Optimizer configuration (MuonConfig or ShampooConfig)
         filter_params: List of filter/weight parameters (2D+ parameters)
         head_params: List of head/embedding parameters
         bias_params: List of bias parameters (1D parameters)
@@ -769,12 +769,13 @@ def create_optimizer(
         ...     weight_decay=1.0, weight_decay_misc=1e-4,
         ...     lr_head=0.01, lr_bias=0.01
         ... )
+        >>> # Returns: [Adam(bias_params + head_params), Shampoo(filter_params)]
         >>> for opt in opts:
         ...     opt.step()
     """
     optimizers = []
     
-    # Create Adam optimizer for biases and heads
+    # Always create Adam optimizer for biases and heads (regardless of main optimizer)
     param_configs_adam = []
     if len(bias_params) > 0:
         param_configs_adam.append(dict(
@@ -790,25 +791,17 @@ def create_optimizer(
         ))
     
     if param_configs_adam:
-        if isinstance(config, AdamConfig):
-            adam_opt = Adam(
-                param_configs_adam,
-                lr=config.lr,
-                betas=(config.beta1, config.beta2),
-                eps=1e-10,
-                weight_decay=weight_decay
-            )
-        else:
-            adam_opt = Adam(
-                param_configs_adam,
-                lr=lr_bias,
-                betas=(0.9, 0.95),
-                eps=1e-10,
-                weight_decay=weight_decay
-            )
+        # Always use Adam for bias/head params with default betas
+        adam_opt = Adam(
+            param_configs_adam,
+            lr=1.0,  # Not used - each param group has its own lr
+            betas=(0.9, 0.95),
+            eps=1e-10,
+            weight_decay=0.0  # Not used - each param group has its own weight_decay
+        )
         optimizers.append(adam_opt)
     
-    # Create main optimizer for filter params
+    # Create main optimizer for filter params (Shampoo or Muon)
     if len(filter_params) > 0:
         if isinstance(config, MuonConfig):
             main_opt = Muon(
@@ -818,6 +811,7 @@ def create_optimizer(
                 nesterov=True,
                 weight_decay=weight_decay
             )
+            optimizers.append(main_opt)
         elif isinstance(config, ShampooConfig):
             main_opt = Shampoo(
                 filter_params,
@@ -826,13 +820,12 @@ def create_optimizer(
                 weight_decay=weight_decay,
                 order_multiplier=config.order_multiplier
             )
-        elif isinstance(config, AdamConfig):
-            # If using Adam for everything, return only the Adam optimizer created above
-            return optimizers
+            optimizers.append(main_opt)
         else:
-            raise ValueError(f"Unknown optimizer config: {type(config)}")
-        
-        optimizers.append(main_opt)
+            raise ValueError(
+                f"Unknown optimizer config: {type(config)}. "
+                f"Expected MuonConfig or ShampooConfig."
+            )
     
     return optimizers
 
