@@ -473,7 +473,7 @@ class Muon(torch.optim.Optimizer):
                     update_orth = update_orth_2d.view(param_shape)
                     
                     # Scale by aspect ratio (from original Muon paper)
-                    aspect_ratio = max(1, param_shape[0] / np.prod(param_shape[1:]))
+                    aspect_ratio = max(1, param_shape[-2] / param_shape[-1])
                     update_orth *= aspect_ratio ** 0.5
                 else:
                     # For 1D parameters, just use the update as-is
