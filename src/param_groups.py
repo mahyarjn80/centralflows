@@ -68,8 +68,9 @@ def cifarnet_param_groups(model: nn.Module) -> Tuple[List, List, List, List]:
     filter_names = [n for n, p in model.named_parameters() if len(p.shape) == 4 and p.requires_grad]
     norm_biases_shampoo = [p for n, p in model.named_parameters() if 'norm' in n and p.requires_grad]
     
-    # Combine normalization biases and whitening bias
-    bias_params = norm_biases_shampoo + [model.whiten.bias]
+    # Combine whitening bias (first) and normalization biases
+    # Order matters: whitening bias gets special LR schedule
+    bias_params = [model.whiten.bias] + norm_biases_shampoo
 
     head_params = [model.head.weight]
     

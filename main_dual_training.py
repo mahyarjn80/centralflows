@@ -112,6 +112,13 @@ def main(
     print("\n[2/5] Creating Models...")
     models = {}
     base_model = arch.create(input_shape=(3, 32, 32), output_dim=10).to(device)
+    
+    # Initialize whitening layer for CifarNet
+    if param_group_strategy == 'cifarnet' and hasattr(base_model, 'init_whiten'):
+        print("  - Initializing whitening layer for CifarNet...")
+        train_images = train_loader.normalize(train_loader.images[:5000])
+        base_model.init_whiten(train_images)
+    
     base_state_dict = base_model.state_dict()
     
     for i, opt_config in enumerate(optimizer_configs):
@@ -128,6 +135,9 @@ def main(
 
     print("\n[3/5] Setting up Optimizers...")
     print(f"  - Using parameter grouping strategy: '{param_group_strategy}' (auto-detected from {arch.__class__.__name__})")
+    
+    # Calculate whitening bias training steps for CifarNet (3 epochs)
+    whiten_bias_train_steps = ceil(3 * len(train_loader)) if param_group_strategy == 'cifarnet' else 0
     
     optimizers_dict = {}  
     filter_param_names_dict = {}  
@@ -189,15 +199,38 @@ def main(
         for inputs, labels in train_loader:
             for model_name, model in models.items():
 
-                outputs = model(inputs)
+                # For CifarNet, control whitening bias gradient flow
+                if param_group_strategy == 'cifarnet':
+                    outputs = model(inputs, whiten_bias_grad=(step < whiten_bias_train_steps))
+                else:
+                    outputs = model(inputs)
+                    
                 loss = F.cross_entropy(outputs, labels, 
                                      label_smoothing=label_smoothing, reduction='sum')
                 loss.backward()
                 
 
-                for opt in optimizers_dict[model_name]:
-                    for group in opt.param_groups:
+                # Update learning rates
+                opts = optimizers_dict[model_name]
+                if param_group_strategy == 'cifarnet':
+                    # For CifarNet: first optimizer is Adam with 3 param groups
+                    # param_groups[0] = whitening bias (3 epoch schedule)
+                    # param_groups[1] = other biases (standard schedule)
+                    # param_groups[2] = head params (standard schedule)
+                    adam_opt = opts[0]
+                    adam_opt.param_groups[0]["lr"] = adam_opt.param_groups[0]["initial_lr"] * (1 - step / whiten_bias_train_steps) if step < whiten_bias_train_steps else 0.0
+                    for group in adam_opt.param_groups[1:]:
                         group["lr"] = group["initial_lr"] * (1 - step / total_train_steps)
+                    
+                    # Remaining optimizers (Shampoo/Muon for filters) use standard schedule
+                    for opt in opts[1:]:
+                        for group in opt.param_groups:
+                            group["lr"] = group["initial_lr"] * (1 - step / total_train_steps)
+                else:
+                    # Standard LR schedule for all optimizers
+                    for opt in opts:
+                        for group in opt.param_groups:
+                            group["lr"] = group["initial_lr"] * (1 - step / total_train_steps)
                 
 
                 for opt in optimizers_dict[model_name]:

@@ -758,11 +758,16 @@ def create_optimizer(
     - Filter/weight parameters use the specified optimizer (Muon or Shampoo)
     - Biases and head/embedding parameters ALWAYS use Adam (with default settings)
     
+    For CifarNet, the Adam optimizer has 3 param groups:
+        param_groups[0]: whitening bias (first element of bias_params)
+        param_groups[1]: other biases (remaining elements of bias_params)
+        param_groups[2]: head params
+    
     Args:
         config: Optimizer configuration (MuonConfig or ShampooConfig)
         filter_params: List of filter/weight parameters (2D+ parameters)
         head_params: List of head/embedding parameters
-        bias_params: List of bias parameters (1D parameters)
+        bias_params: List of bias parameters (1D parameters, first is whitening bias for CifarNet)
         weight_decay: Weight decay for main optimizer
         weight_decay_misc: Weight decay for biases and heads
         lr_head: Learning rate for head parameters
@@ -786,12 +791,30 @@ def create_optimizer(
     
     # Always create Adam optimizer for biases and heads (regardless of main optimizer)
     param_configs_adam = []
+    
     if len(bias_params) > 0:
-        param_configs_adam.append(dict(
-            params=bias_params,
-            lr=lr_bias,
-            weight_decay=weight_decay_misc/lr_bias
-        ))
+        # For CifarNet: first bias param is whitening bias (needs separate param group for different LR schedule)
+        # Split into 3 param groups: [whitening_bias], [other_biases], [head]
+        if len(bias_params) > 1:
+            # CifarNet case: separate whitening bias from other biases
+            param_configs_adam.append(dict(
+                params=bias_params[:1],  # Whitening bias
+                lr=lr_bias,
+                weight_decay=weight_decay_misc/lr_bias
+            ))
+            param_configs_adam.append(dict(
+                params=bias_params[1:],  # Other biases
+                lr=lr_bias,
+                weight_decay=weight_decay_misc/lr_bias
+            ))
+        else:
+            # Other architectures: single bias param group
+            param_configs_adam.append(dict(
+                params=bias_params,
+                lr=lr_bias,
+                weight_decay=weight_decay_misc/lr_bias
+            ))
+    
     if len(head_params) > 0:
         param_configs_adam.append(dict(
             params=head_params,
