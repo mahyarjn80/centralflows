@@ -4,10 +4,12 @@ Loggers for dual training experiments (comparing Shampoo with different order_mu
 This module provides loggers specifically designed for the dual/triple model training setup,
 following the same pattern as src/loggers.py but adapted for torch.nn.Module models
 rather than functional models.
+
+Also includes console logging utilities for pretty-printing training progress.
 """
 
 from dataclasses import dataclass
-from typing import Any, Dict, Literal
+from typing import Any, Dict, Literal, List
 
 import torch
 import torch.nn as nn
@@ -301,4 +303,131 @@ def create_default_loggers(
         'process': process_loggers,
         'group': group_loggers,
     }
+
+
+#############################################
+#         Console Logging Utilities         #
+#############################################
+
+# Default columns for training log table
+DEFAULT_LOGGING_COLUMNS = ['epoch', 'opt', 'train_loss', 'train_acc', 'test_loss', 'test_acc', 'lr']
+
+
+def print_columns(columns_list: List[str], is_head: bool = False, is_final_entry: bool = False):
+    """
+    Print a row of a formatted table with columns.
+    
+    Args:
+        columns_list: List of strings to print as columns
+        is_head: If True, print a separator line before the row (for table header)
+        is_final_entry: If True, print a separator line after the row (for table footer)
+        
+    Example:
+        >>> print_columns(['epoch', 'loss', 'acc'], is_head=True)
+        ------------------------
+        |  epoch  |  loss  |  acc  |
+        >>> print_columns(['1', '0.234', '0.856'])
+        |  1  |  0.234  |  0.856  |
+    """
+    print_string = ''
+    for col in columns_list:
+        print_string += '|  %s  ' % col
+    print_string += '|'
+    
+    if is_head:
+        print('-' * len(print_string))
+    print(print_string)
+    if is_head or is_final_entry:
+        print('-' * len(print_string))
+
+
+def print_training_details(
+    variables: Dict[str, Any],
+    is_final_entry: bool = False,
+    columns: List[str] = None
+):
+    """
+    Print training metrics in a formatted table row.
+    
+    Args:
+        variables: Dictionary mapping column names to values
+        is_final_entry: If True, print a separator line after the row
+        columns: List of column names to print (default: DEFAULT_LOGGING_COLUMNS)
+        
+    Example:
+        >>> print_training_details({
+        ...     'epoch': 1,
+        ...     'opt': 'Shampoo',
+        ...     'train_loss': 0.234,
+        ...     'train_acc': 0.856,
+        ...     'test_loss': 0.289,
+        ...     'test_acc': 0.823,
+        ...     'lr': 0.001
+        ... })
+        |  1  |  Shampoo  |  0.234000  |  0.856000  |  0.289000  |  0.823000  |  0.001000  |
+    """
+    if columns is None:
+        columns = DEFAULT_LOGGING_COLUMNS
+    
+    formatted = []
+    for col in columns:
+        var = variables.get(col.strip(), None)
+        if type(var) in (int, str):
+            res = str(var)
+        elif type(var) is float:
+            res = '{:0.6f}'.format(var)
+        else:
+            assert var is None
+            res = ''
+        formatted.append(res.rjust(len(col)))
+    
+    print_columns(formatted, is_final_entry=is_final_entry)
+
+
+def compute_singular_values(model: nn.Module, param_names: List[str] = None) -> Dict[str, Any]:
+    """
+    Compute singular values for all 2D+ parameters in the model.
+    
+    This is a utility function for tracking weight matrix properties during training.
+    
+    Args:
+        model: PyTorch model
+        param_names: Optional list of parameter names to track. If None, track all 2D+ params.
+    
+    Returns:
+        Dictionary mapping parameter names to their singular values (as numpy arrays)
+        
+    Example:
+        >>> model = MyModel()
+        >>> sv = compute_singular_values(model)
+        >>> for name, values in sv.items():
+        ...     print(f"{name}: condition number = {values[0] / values[-1]:.2f}")
+    """
+    singular_values = {}
+    
+    with torch.no_grad():
+        for name, param in model.named_parameters():
+            if param.ndim < 2:
+                continue
+            if param_names is not None and name not in param_names:
+                continue
+                
+            # Reshape to 2D if needed
+            if param.ndim == 2:
+                matrix = param.data
+            else:
+                # For higher dimensional tensors, reshape to 2D
+                matrix = param.data.reshape(param.size(0), -1)
+            
+            # Compute SVD (only singular values)
+            try:
+                # Move to CPU for SVD computation
+                matrix_cpu = matrix.cpu().float()
+                _, s, _ = torch.svd(matrix_cpu)
+                singular_values[name] = s.numpy()
+            except Exception as e:
+                print(f"Warning: Could not compute SVD for {name}: {e}")
+                continue
+    
+    return singular_values
 

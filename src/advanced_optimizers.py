@@ -1,11 +1,17 @@
 """
 Advanced optimizers (Shampoo, Muon, Adam) implemented as PyTorch optimizers.
 
+This module provides:
+- Shampoo: Full-matrix preconditioning optimizer
+- Muon: Gradient orthogonalization optimizer
+- Adam: Adaptive moment estimation optimizer (AdamW variant)
+- Configuration classes and utilities for creating optimizers
 """
 
 from __future__ import annotations
 
-from typing import Any, Dict, Tuple, Iterable, Optional
+from dataclasses import dataclass
+from typing import Any, Dict, Tuple, Iterable, Optional, Union, List
 
 import numpy as np
 import torch
@@ -41,14 +47,14 @@ def _matrix_power(
     assert matrix.ndim == 2 and matrix.size(0) == matrix.size(1), "matrix must be square"
     assert p > 0 and isinstance(p, int), "p must be a positive integer"
 
-    # Work on CPU float32 for stability; remember original dtype/device to cast back.
+    
     device_in, dtype_in = matrix.device, matrix.dtype
     A = matrix.to(torch.float32).cpu()
 
     n = A.size(0)
     I = torch.eye(n, dtype=torch.float32)
 
-    # Helper: spectral norm (largest singular value) for scaling
+    
     def spectral_norm(m: torch.Tensor) -> float:
         # power iteration for symmetric PSD (largest eigenvalue)
         v = torch.randn(n, 1, dtype=torch.float32)
@@ -60,34 +66,34 @@ def _matrix_power(
             if nv < 1e-30:
                 return 0.0
             v /= nv
-            # Rayleigh quotient as estimate
+            
             lam = torch.dot(v.flatten(), (m @ v).flatten()).item()
             if abs(lam - last) <= 1e-6 * max(1.0, abs(last)):
                 break
             last = lam
         return max(lam, 0.0)
 
-    # Scale ridge by max eigenvalue (Optax style)
+    
     max_ev = spectral_norm(A)
     scaled_ridge = ridge_epsilon * max(max_ev, 1e-16)
 
-    # 1x1 shortcut
+    
     if n == 1:
         out = (A + scaled_ridge).pow(-1.0 / p)
         return out.to(device=device_in, dtype=dtype_in)
 
-    # Damped matrix
+    
     Ad = A + scaled_ridge * I
 
-    # z scaling (Higham/Iannazzo/Optax): z = (1+p) / (2 * ||Ad||_2)
+    
     z = (1.0 + p) / max(2.0 * spectral_norm(Ad), 1e-16)
 
-    # Initialize iteration state
+    
     alpha = -1.0 / p
     M = Ad * z                  # mat_m
     H = I * (z ** (1.0 / p))    # mat_h
 
-    # Error = max|M - I|
+    
     def max_abs(x: torch.Tensor) -> float:
         return x.abs().max().item()
 
@@ -97,7 +103,7 @@ def _matrix_power(
     prev_err = err
     prev_H = H.clone()
 
-    # Fast integer power by repeated squaring
+    
     def mat_power(mat: torch.Tensor, k: int) -> torch.Tensor:
         assert k >= 1
         result = I.clone()
@@ -111,7 +117,7 @@ def _matrix_power(
                 base = base @ base
         return result
 
-    # Coupled Newton iterations
+    
     while (i < num_iters) and (err > error_tolerance) and run_step:
         M_i = (1.0 - alpha) * I + alpha * M
         M_next = mat_power(M_i, p) @ M
@@ -119,16 +125,16 @@ def _matrix_power(
 
         new_err = max_abs(M_next - I)
 
-        # Bound error growth: allow at most 1.2× increase
+
         run_step = new_err < (prev_err * 1.2 + 1e-12)
 
-        # Accept step
+        
         i += 1
         prev_H = H.clone()
         prev_err = err
         M, H, err = M_next, H_next, new_err
 
-    # If the last step overshot (run_step False), revert to previous H
+    
     H_final = H if run_step else prev_H
 
     return H_final.to(device=device_in)
@@ -598,4 +604,235 @@ class Adam(torch.optim.Optimizer):
                 p.data.add_(update, alpha=-lr)
 
         return loss
+
+
+#############################################
+#       Optimizer Configuration Classes     #
+#############################################
+
+@dataclass
+class MuonConfig:
+    """Configuration for Muon optimizer.
+    
+    Attributes:
+        lr: Learning rate
+        momentum: Momentum factor for gradient smoothing
+    """
+    lr: float = 0.0005
+    momentum: float = 0.9
+    
+    def __str__(self):
+        return f"Muon_lr{self.lr}_mom{self.momentum}"
+
+
+@dataclass  
+class ShampooConfig:
+    """Configuration for Shampoo optimizer.
+    
+    Attributes:
+        lr: Learning rate
+        momentum: Momentum factor for gradient smoothing
+        order_multiplier: Multiplier for matrix power (power = -1/(order*multiplier))
+    """
+    lr: float = 0.0005
+    momentum: float = 0.9
+    order_multiplier: int = 2
+    
+    def __str__(self):
+        return f"Shampoo_lr{self.lr}_mom{self.momentum}_order{self.order_multiplier}"
+
+
+@dataclass
+class AdamConfig:
+    """Configuration for Adam optimizer.
+    
+    Attributes:
+        lr: Learning rate
+        beta1: Exponential decay rate for first moment estimates
+        beta2: Exponential decay rate for second moment estimates
+    """
+    lr: float = 0.01
+    beta1: float = 0.9
+    beta2: float = 0.95
+    
+    def __str__(self):
+        return f"Adam_lr{self.lr}_b1{self.beta1}_b2{self.beta2}"
+
+
+# Type alias for optimizer configurations
+OptimizerConfig = Union[MuonConfig, ShampooConfig, AdamConfig]
+
+
+def parse_optimizer_config(config_str: str) -> OptimizerConfig:
+    """
+    Parse optimizer config from CLI string format.
+    
+    Format: "OptimizerType:param1=value1,param2=value2,..."
+    
+    Examples:
+        >>> parse_optimizer_config("Muon:lr=0.0005,momentum=0.9")
+        MuonConfig(lr=0.0005, momentum=0.9)
+        
+        >>> parse_optimizer_config("Shampoo:lr=0.0005,momentum=0.9,order_multiplier=2")
+        ShampooConfig(lr=0.0005, momentum=0.9, order_multiplier=2)
+        
+        >>> parse_optimizer_config("Adam:lr=0.01,beta1=0.9,beta2=0.95")
+        AdamConfig(lr=0.01, beta1=0.9, beta2=0.95)
+    
+    Args:
+        config_str: String specification of optimizer config
+        
+    Returns:
+        OptimizerConfig instance (MuonConfig, ShampooConfig, or AdamConfig)
+        
+    Raises:
+        ValueError: If config string format is invalid or optimizer type is unknown
+    """
+    if ':' not in config_str:
+        raise ValueError(f"Config string must contain ':' separator. Got: {config_str}")
+    
+    parts = config_str.split(':', 1)
+    opt_type = parts[0].strip().lower()
+    
+    # Parse parameters
+    params = {}
+    if len(parts) > 1 and parts[1].strip():
+        for param in parts[1].split(','):
+            param = param.strip()
+            if '=' not in param:
+                raise ValueError(f"Parameter must be in format 'key=value'. Got: {param}")
+            
+            key, val = param.split('=', 1)
+            key = key.strip()
+            val = val.strip()
+            
+            # Try to convert to appropriate type
+            try:
+                # Check if it's an integer
+                if val.isdigit() or (val.startswith('-') and val[1:].isdigit()):
+                    params[key] = int(val)
+                # Check if it's a float
+                else:
+                    params[key] = float(val)
+            except ValueError:
+                # Keep as string if conversion fails
+                params[key] = val
+    
+    # Create appropriate config
+    if opt_type == 'muon':
+        return MuonConfig(**params)
+    elif opt_type == 'shampoo':
+        return ShampooConfig(**params)
+    elif opt_type == 'adam':
+        return AdamConfig(**params)
+    else:
+        raise ValueError(
+            f"Unknown optimizer type: {opt_type}. "
+            f"Valid types: 'muon', 'shampoo', 'adam'"
+        )
+
+
+def create_optimizer(
+    config: OptimizerConfig,
+    filter_params: List,
+    head_params: List,
+    bias_params: List, 
+    weight_decay: float,
+    weight_decay_misc: float,
+    lr_head: float,
+    lr_bias: float
+) -> List[torch.optim.Optimizer]:
+    """
+    Create optimizer instances based on configuration.
+    
+    This function creates separate optimizers for different parameter groups:
+    - Biases and head/embedding parameters use Adam
+    - Filter/weight parameters use the specified optimizer (Muon, Shampoo, or Adam)
+    
+    Args:
+        config: Optimizer configuration (MuonConfig, ShampooConfig, or AdamConfig)
+        filter_params: List of filter/weight parameters (2D+ parameters)
+        head_params: List of head/embedding parameters
+        bias_params: List of bias parameters (1D parameters)
+        weight_decay: Weight decay for main optimizer
+        weight_decay_misc: Weight decay for biases and heads
+        lr_head: Learning rate for head parameters
+        lr_bias: Learning rate for bias parameters
+        
+    Returns:
+        List of optimizer instances for this model
+        
+    Example:
+        >>> config = ShampooConfig(lr=0.0005, momentum=0.9, order_multiplier=2)
+        >>> opts = create_optimizer(
+        ...     config, filter_params, head_params, bias_params,
+        ...     weight_decay=1.0, weight_decay_misc=1e-4,
+        ...     lr_head=0.01, lr_bias=0.01
+        ... )
+        >>> for opt in opts:
+        ...     opt.step()
+    """
+    optimizers = []
+    
+    # Create Adam optimizer for biases and heads
+    param_configs_adam = []
+    if len(bias_params) > 0:
+        param_configs_adam.append(dict(
+            params=bias_params,
+            lr=lr_bias,
+            weight_decay=weight_decay_misc/lr_bias
+        ))
+    if len(head_params) > 0:
+        param_configs_adam.append(dict(
+            params=head_params,
+            lr=lr_head,
+            weight_decay=weight_decay_misc/lr_head
+        ))
+    
+    if param_configs_adam:
+        if isinstance(config, AdamConfig):
+            adam_opt = Adam(
+                param_configs_adam,
+                lr=config.lr,
+                betas=(config.beta1, config.beta2),
+                eps=1e-10,
+                weight_decay=weight_decay
+            )
+        else:
+            adam_opt = Adam(
+                param_configs_adam,
+                lr=lr_bias,
+                betas=(0.9, 0.95),
+                eps=1e-10,
+                weight_decay=weight_decay
+            )
+        optimizers.append(adam_opt)
+    
+    # Create main optimizer for filter params
+    if len(filter_params) > 0:
+        if isinstance(config, MuonConfig):
+            main_opt = Muon(
+                filter_params,
+                lr=config.lr,
+                momentum=config.momentum,
+                nesterov=True,
+                weight_decay=weight_decay
+            )
+        elif isinstance(config, ShampooConfig):
+            main_opt = Shampoo(
+                filter_params,
+                lr=config.lr,
+                momentum=config.momentum,
+                weight_decay=weight_decay,
+                order_multiplier=config.order_multiplier
+            )
+        elif isinstance(config, AdamConfig):
+            # If using Adam for everything, return only the Adam optimizer created above
+            return optimizers
+        else:
+            raise ValueError(f"Unknown optimizer config: {type(config)}")
+        
+        optimizers.append(main_opt)
+    
+    return optimizers
 
