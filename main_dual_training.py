@@ -129,7 +129,7 @@ def main(
     for model_name, (opt_config, model) in zip(models.keys(), zip(optimizer_configs, models.values())):
 
         # Use the parameter grouping strategy
-        filter_params, head_params, bias_params = get_param_groups(model, param_group_strategy)
+        filter_params, head_params, bias_params, filter_names = get_param_groups(model, param_group_strategy)
         opts = create_optimizer(opt_config, filter_params, head_params, bias_params,
                                weight_decay, weight_decay_misc, lr_head, lr_bias)
         
@@ -142,7 +142,7 @@ def main(
         
 
         # Store filter param names for SVD tracking (must match filter_params)
-        filter_param_names = [n for n, p in model.named_parameters() if p in filter_params]
+        filter_param_names = filter_names
         filter_param_names_dict[model_name] = filter_param_names
         
         print(f"  - {model_name}: {len(filter_params)} filter, {len(head_params)} head, {len(bias_params)} bias params")

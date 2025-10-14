@@ -28,6 +28,7 @@ def vit_param_groups(model: nn.Module) -> Tuple[List, List, List]:
         p for n, p in model.named_parameters() 
         if ((p.ndim >= 2 and "embed" not in n and "head" not in n) and p.requires_grad)
     ]
+    filter_names = [n for n, p in model.named_parameters() if ((p.ndim >= 2 and "embed" not in n and "head" not in n) and p.requires_grad)]
     
     head_params = [
         p for n, p in model.named_parameters() 
@@ -39,7 +40,7 @@ def vit_param_groups(model: nn.Module) -> Tuple[List, List, List]:
         if p.requires_grad and p.ndim < 2
     ]
     
-    return filter_params, head_params, bias_params
+    return filter_params, head_params, bias_params, filter_names
 
 
 def cifarnet_param_groups(model: nn.Module) -> Tuple[List, List, List]:
@@ -62,6 +63,7 @@ def cifarnet_param_groups(model: nn.Module) -> Tuple[List, List, List]:
 
        # Shampoo model optimizers
     filter_params = [p for p in model.parameters() if len(p.shape) == 4 and p.requires_grad]
+    filter_names = [n for n, p in model.named_parameters() if len(p.shape) == 4 and p.requires_grad]
     norm_biases_shampoo = [p for n, p in model.named_parameters() if 'norm' in n and p.requires_grad]
     
     # Combine normalization biases and whitening bias
@@ -70,7 +72,7 @@ def cifarnet_param_groups(model: nn.Module) -> Tuple[List, List, List]:
     head_params = [model.head.weight]
     
 
-    return filter_params, head_params, bias_params
+    return filter_params, head_params, bias_params, filter_names
 
 
 def get_param_groups(
