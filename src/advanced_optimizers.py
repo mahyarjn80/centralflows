@@ -641,6 +641,8 @@ class ShampooConfig:
     momentum: float = 0.9
     order_multiplier: int = 2
     weight_decay: float = 0.0
+
+    
     def __str__(self):
         return f"Shampoo_lr{self.lr}_mom{self.momentum}_order{self.order_multiplier}_wd{self.weight_decay}"
 
@@ -812,7 +814,7 @@ def create_optimizer(
                 lr=config.lr,
                 momentum=config.momentum,
                 nesterov=True,
-                weight_decay=weight_decay
+                weight_decay=config.weight_decay
             )
             optimizers.append(main_opt)
         elif isinstance(config, ShampooConfig):
@@ -820,7 +822,7 @@ def create_optimizer(
                 filter_params,
                 lr=config.lr,
                 momentum=config.momentum,
-                weight_decay=weight_decay,
+                weight_decay=config.weight_decay,
                 order_multiplier=config.order_multiplier
             )
             optimizers.append(main_opt)
